@@ -1,0 +1,23 @@
+name: Pome Vision checks
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Check public files for local information
+        run: ./scripts/check-public-safety.sh
+
+      - name: Run tests
+        run: swift test
