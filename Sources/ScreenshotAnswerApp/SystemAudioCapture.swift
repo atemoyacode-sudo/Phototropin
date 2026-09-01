@@ -298,7 +298,7 @@ private final class ModernSystemAudioSession {
 @available(macOS 26.0, *)
 private final class AnalyzerAudioReceiver: NSObject, SCStreamOutput, @unchecked Sendable {
     let queue = DispatchQueue(
-        label: "dev.pome.vision.system-audio",
+        label: "dev.phototropin.system-audio",
         qos: .userInitiated
     )
 

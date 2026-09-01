@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-struct PomeVisionMenuBarIcon: View {
-    private static let image = PomeVisionTemplateImage.make()
+struct PhototropinMenuBarIcon: View {
+    private static let image = PhototropinTemplateImage.make()
     let isRecording: Bool
 
     var body: some View {
@@ -21,7 +21,7 @@ struct PomeVisionMenuBarIcon: View {
     }
 }
 
-private enum PomeVisionTemplateImage {
+private enum PhototropinTemplateImage {
     static func make() -> NSImage {
         let image = NSImage(size: NSSize(width: 19, height: 19), flipped: true) { _ in
             NSColor.black.setStroke()
@@ -78,7 +78,7 @@ private enum PomeVisionTemplateImage {
         // macOS recolors template images for light, dark, highlighted, and
         // accessibility appearances instead of preserving the source black.
         image.isTemplate = true
-        image.accessibilityDescription = "Pome Vision"
+        image.accessibilityDescription = "Phototropin"
         return image
     }
 

@@ -1,167 +1,170 @@
-# Pome Vision
+# Phototropin
 
-macOSでスクリーンショットを撮ると、画像内の日本語・英語をローカルのVisionでOCRし、localhostのLM Studioへ渡して、回答を画面左下へ自動表示する独立プロトタイプです。macOS 26以降では、今流れているシステム音声も端末内で文字起こしし、リスニング問題や動画の内容について質問できます。
+Phototropin is a standalone macOS menu-bar prototype that answers questions found in screenshots. It performs Japanese and English OCR locally with Apple Vision, sends the recognized content only to a loopback LM Studio server, and displays the answer in the lower-left corner of the screen. On macOS 26 or later, it can also transcribe currently playing system audio on-device so you can answer listening exercises or ask questions about videos.
 
-普段の利用にターミナル操作は不要です。`.app`を一度起動しておけば、通常どおり `⌘⇧4` などでスクリーンショットを撮るだけです。
+Normal use does not require Terminal. After launching the app once, take a screenshot as usual with `Command-Shift-4` and wait for the answer card.
 
-## できること
+## Features
 
-- macOS標準のスクリーンショット保存先を1秒間隔で監視
-- 日本語名・英語名などの新しいスクリーンショットを自動検出
-- Vision `VNRecognizeTextRequest` による `ja-JP` / `en-US` OCR
-- LM StudioのLocal Serverが公開するモデルの選択
-- 「高速化の詳細」を開いた場合だけ、OpenAI互換APIの通常Draft Modelを任意指定
-- 回答を全デスクトップの左下へ20秒間ポップアップ表示
-- ポップアップから回答のコピー・手動クローズ
-- メニューバーからモデルや自動検出を設定
-- macOSが明暗に合わせて自動反転するテンプレート型の柘榴メニューバーアイコンとカラーアプリアイコン
-- `⌃⌥⌘4` またはボタンから範囲撮影→回答
-- 範囲撮影を始めると設定パネルと既存の回答カードを自動で閉じ、裏に隠れていた領域も選択可能
-- OCRに回答すべき質問がない場合は、回答欄と左下カードに「これは何？ 内容を説明」を表示
-- 「認識した問題」と「回答」はクリックで展開できる折りたたみ表示
-- OCRが0文字の写真や風景でも「これは何？ 内容を説明」から画像対応LM Studioモデルへ画像を直接渡して説明
-- ScreenCaptureKitで今流れているシステム音声を最大90秒取得（macOS 26以降）
-- SpeechTranscriberによる英語／日本語のオンデバイス文字起こし
-- 録音中は全デスクトップ右上に「停止して回答」を常時表示し、詳細を展開すると経過時間・質問・ライブ文字起こしを確認可能
-- 確定した発話区間を改行で保持し、複数話者らしい内容はLM Studioの選択モデルが最小人数の`話者A / 話者B`形式へ推定整理
-- 音声単体への自由質問、または直前のスクリーンショットOCRと組み合わせたリスニング問題への回答
-- 音声ファイルは保存せず、認識バッファは停止後に破棄
-- 画像内の命令文を信頼しないプロンプト境界
-- GUIを通さず画像を検証できるCLI
+- Watches the standard macOS screenshot destination once per second.
+- Detects newly saved screenshots with common Japanese and English filenames.
+- Recognizes Japanese and English text with Vision `VNRecognizeTextRequest`.
+- Lists answer-capable models exposed by the LM Studio Local Server.
+- Optionally sends a compatible Draft Model only when explicitly selected under advanced generation settings.
+- Shows answers for 20 seconds in the lower-left corner across all Spaces.
+- Lets you copy or dismiss an answer directly from the overlay.
+- Provides model selection and screenshot-monitoring controls from the menu bar.
+- Uses a pomegranate-shaped template menu-bar icon that adapts to macOS appearances, plus a full-color app icon.
+- Captures a selected region from the menu-bar button or with `Control-Option-Command-4`.
+- Hides the settings panel and existing answer overlay before region selection so covered areas remain selectable.
+- Offers a content-explanation action when OCR does not contain an answerable question.
+- Uses collapsible sections for recognized text and answers.
+- Can describe photos, scenery, and other images containing no readable text by sending a resized image to a vision-capable local model.
+- Captures up to 90 seconds of system audio with ScreenCaptureKit on macOS 26 or later.
+- Transcribes English or Japanese audio on-device with SpeechTranscriber.
+- Keeps a stop control visible in the upper-right corner across all Spaces while recording; optional details show elapsed time, the question, and live transcription.
+- Preserves finalized speech segments on separate lines and can ask the selected LM Studio model to organize likely multi-speaker content as an inferred dialogue.
+- Answers free-form questions about captured audio alone or combines it with the most recent screenshot OCR for listening exercises.
+- Never saves captured audio files; transcription buffers are discarded after stopping.
+- Treats instructions found in images, OCR, and transcripts as untrusted input.
+- Includes a CLI for isolating OCR and model-response problems during development.
 
-添付例なら、期待される回答は `4 over` です。`get over the shock` で「ショックから立ち直る／乗り越える」という意味になります。
+For the example sentence “She can't get ___ the shock yet,” the expected choice is `4 over`: “get over the shock” means to recover from or overcome the shock.
 
-## 必要なもの
+## Requirements
 
-- macOS 14以降（システム音声の文字起こしはmacOS 26以降）
-- Xcode 26系のSwift toolchain（Swift 6.2以降）
-- Xcodeで作成したlogin keychain内の有効な `Apple Development` 署名証明書（無料のPersonal Teamでもローカル利用可能）
-- [LM Studio](https://lmstudio.ai/) と、回答に使うローカル言語モデル（文字のない画像説明には画像入力対応モデル）
+- macOS 14 or later; system-audio transcription requires macOS 26 or later.
+- An Xcode 26-series Swift toolchain with Swift 6.2 or later.
+- A valid `Apple Development` signing certificate in the login keychain. A free Personal Team certificate is sufficient for local use.
+- [LM Studio](https://lmstudio.ai/) and a downloaded local language model. Describing images without text requires a vision-capable model.
 
-LM Studioでモデルをダウンロードし、Developer画面のLocal Serverを開始します。CLIを使う場合の例:
+Download a model in LM Studio and start the Local Server from the Developer screen. If you use the LM Studio CLI, the equivalent commands are:
 
 ```sh
 lms server start
 lms ps
 ```
 
-LM Studioの既定ポートは1234です。アプリはネイティブの `GET /api/v1/models` からLLMだけを選択肢にし、生成にはOpenAI互換の `POST /v1/chat/completions` を使います。接続先はHTTPの `127.0.0.1` / `localhost` / `::1` のみに制限します。画像とOCR本文を外部APIへ送らず、ツールやMCPも要求しません。LM Studio側でAPI認証を有効にした構成には現時点で対応していません。選択したローカルモデル自体の品質はモデルごとに異なります。
+LM Studio uses port 1234 by default. Phototropin obtains selectable LLMs from the native `GET /api/v1/models` endpoint and generates responses through the OpenAI-compatible `POST /v1/chat/completions` endpoint. Connections are restricted to plain HTTP loopback addresses: `127.0.0.1`, `localhost`, and `::1`. Images and OCR text are not sent to cloud APIs, and the app does not request tools or MCP access. LM Studio configurations that require API authentication are not currently supported. Response quality depends on the selected local model.
 
-モデル欄の小さな「高速化の詳細」を展開すると、別の互換小型モデルを通常のDraft Modelとして指定できます。指定時だけOpenAI互換リクエストへ `draft_model` を付け、既定の「LM Studio側の設定」では何も上書きしません。MTPとDSparkは回答リクエストではなくモデル読込時のランタイム機能です。現在の公開REST APIから安全に切り替えられないため、このアプリはLM Studio側でMTP/DSparkを有効にして読み込んだ状態をそのまま利用し、LM Studioの非公開設定ファイルは編集しません。
+Expanding the advanced generation settings lets you select a separate, compatible small model as a conventional Draft Model. Phototropin adds `draft_model` to the request only when this option is selected; the default leaves LM Studio's loading configuration untouched. MTP and DSpark are model-loading runtime features rather than per-response options. Phototropin uses them when they are already enabled in LM Studio and does not modify private LM Studio settings or reload models automatically.
 
-## 使い方
+## Using Phototropin
 
-1. LM Studioを起動し、利用するモデルを用意してLocal Serverを開始します（既定 `http://localhost:1234`）。
-2. `dist/Pome Vision.app` をダブルクリックします。
-3. メニューバーのアイコンからLM Studioモデルを一度選びます。
-4. `⌘⇧4` など、普段の方法で問題をスクリーンショットします。
-5. OCRと回答生成が終わると、画面左下へ回答カードが現れます。
+1. Launch LM Studio, load an answer-capable model, and start the Local Server at the default `http://localhost:1234` address.
+2. Open `dist/Phototropin.app`.
+3. Open the pomegranate icon in the menu bar and select an LM Studio model once.
+4. Take a screenshot of a question with `Command-Shift-4` or another standard macOS capture command.
+5. After OCR and generation finish, the answer card appears in the lower-left corner.
 
-回答カードは20秒後に自動で消えます。カード上のボタンでコピーまたはすぐに閉じることもできます。
+The card disappears automatically after 20 seconds. You can also copy the answer or close the card immediately.
 
-OCRが質問でない場合は、「これは何？ 内容を説明」を押すと、ページの種類、重要な内容、OCRの曖昧さを別プロンプトで説明します。OCRで文字を1文字も検出できない写真や風景でも同じボタンを表示し、`vision`対応モデルへ縮小した画像を直接渡して内容を説明します。画像非対応モデルでは、対応モデルを選ぶようエラーを表示します。
+If OCR does not contain a question, use the “What is this? Explain the content” action. Phototropin then asks for the page type, important content, and any OCR uncertainty using a separate prompt. The same action is available for a photo or landscape with no recognized text; in that case, the app sends a resized copy of the image directly to a vision-capable local model. If the selected model cannot accept images, the app asks you to select a compatible model.
 
-### 今流れている音声に質問する
+### Asking about currently playing audio
 
-1. メニューバーで「今流れている音声」の言語（英語／日本語）を選びます。
-2. 必要なら「話者は何を主張していますか？」などの質問を入力します。空欄でスクリーンショットOCRがある場合は、音声を根拠に画面の問題へ回答します。
-3. 必要に応じて「複数話者を対話として整理（推定）」を切り替え、「音声を聞く」を押します。通常パネルは閉じ、全デスクトップ右上に小さな録音コントローラーが表示されます。
-4. 再生後は録音コントローラーの「停止して回答」を押します。メニューバーを開き直す必要はありません。「詳細」から質問とライブ文字起こしを展開でき、90秒で自動停止します。
-5. 文字起こしと回答が表示されます。質問を書き換え「この音声に質問」を押すと、同じ文字起こしへ再質問できます。
+1. In the menu-bar panel, choose English or Japanese under the current-audio section.
+2. Optionally enter a question such as “What is the speaker claiming?” If the field is empty and screenshot OCR is available, Phototropin uses the audio as evidence for the on-screen question.
+3. Optionally enable inferred multi-speaker dialogue organization, then start listening. The main panel closes and a small recording controller appears in the upper-right corner across all Spaces.
+4. After playing the relevant audio, select “Stop and answer” in the recording controller. You do not need to reopen the menu bar. The details disclosure shows the current question and live transcript, and recording stops automatically after 90 seconds.
+5. Phototropin displays the transcript and answer. You can edit the question and ask again using the same transcript.
 
-初回は「画面とシステムオーディオ録音」と「音声認識」の許可が必要です。音声認識モデルが未導入の場合、初回だけmacOSが言語アセットをダウンロードします。
+The first recording requires permission for screen and system-audio recording and for speech recognition. If the selected language asset is not installed, macOS may download it during first use.
 
-SpeechTranscriberは声紋による話者IDを返さないため、`話者A / 話者B`は発話区間、呼びかけ、質問と応答の文脈からLM Studioの選択モデルが推定します。成立する最小人数を優先し、画面と回答にも「推定」と明記します。厳密な話者ダイアライゼーションではありません。
+SpeechTranscriber does not provide voiceprint-based speaker identification. Speaker labels such as `Speaker A` and `Speaker B` are inferred by the selected LM Studio model from utterance boundaries, forms of address, questions, and replies. Phototropin prefers the smallest number of speakers that makes the conversation coherent and identifies the result as an inference. This is not strict speaker diarization.
 
-## 開発時のビルド
+## Building from source
 
-### 初回だけ必要なXcode署名設定
+### One-time Xcode signing setup
 
-GitHubではソースだけを公開し、配布用バイナリへ作者の署名を付けません。利用者は自分のMacで、初回だけ次の操作を行います。
+The repository publishes source code only and does not distribute binaries signed by the author's identity. Each user creates a local development certificate once:
 
-1. Xcodeを起動し、`Xcode > Settings… > Accounts`を開きます。
-2. `+`から自分のApple Accountへサインインします。無料アカウントの場合は`Personal Team`として表示されます。
-3. AccountまたはTeamを選び、`Manage Certificates…`を開きます。
-4. `+`から`Apple Development`を1枚作成して閉じます。
+1. Open Xcode and choose `Xcode > Settings... > Accounts`.
+2. Use `+` to sign in with your Apple Account. Free accounts appear as a Personal Team.
+3. Select the account or team and open `Manage Certificates...`.
+4. Use `+` to create one `Apple Development` certificate, then close the dialog.
 
-秘密鍵はそのMacのlogin keychainだけに保存され、GitHubやPome Visionへ送信されません。Xcodeでプロジェクトを開く操作、Bundle ID登録、Developer ID、公証はローカル利用には不要です。
+The private key remains only in that Mac's login keychain and is never sent to GitHub or Phototropin. Local use does not require opening an Xcode project, registering a Bundle ID, obtaining a Developer ID certificate, or notarizing the app.
 
-リポジトリを取得した後は次のコマンドで署名済みアプリを作れます。
+After cloning the repository, build and open a signed app with:
 
 ```sh
-git clone https://github.com/atemoyacode-sudo/Pome-Vision.git
-cd Pome-Vision
+git clone https://github.com/atemoyacode-sudo/Phototropin.git
+cd Phototropin
 ./scripts/build-app.sh
-open "dist/Pome Vision.app"
+open "dist/Phototropin.app"
 ```
 
-有効なApple Development証明書が1枚なら自動選択されます。複数ある場合だけ、後述のフィンガープリント指定が必要です。
+If exactly one valid Apple Development identity exists, the script selects it automatically. If several identities exist, provide the certificate fingerprint as described below.
 
-### 開発用コマンド
+### Development commands
+
+Run the tests or the SwiftPM executable directly with:
 
 ```sh
 swift test
-swift run PomeVision
+swift run Phototropin
 ```
 
-通常の`.app`を作る場合:
+Build the signed app bundle with:
 
 ```sh
 ./scripts/build-app.sh
-open "dist/Pome Vision.app"
+open "dist/Phototropin.app"
 ```
 
-スクリプトは `dist/Pome Vision.app` と `dist/Pome Vision.zip` を生成し、Apple Development署名、指定要件、ZIP整合性を確認します。有効なApple Development証明書がない場合はビルドを停止し、ad-hoc署名へはフォールバックしません。
+The script generates `dist/Phototropin.app` and `dist/Phototropin.zip`, then verifies the Apple Development signature, designated requirement, and ZIP integrity. It stops if no valid Apple Development certificate is available and never falls back to ad-hoc signing.
 
-証明書が1つなら初回に自動選択し、公開フィンガープリントだけをGit除外済みの `Support/Signing.local` へ固定します。以後は必ず同じ証明書を使い、証明書が見つからなければ停止します。初回から複数ある場合は、次のように証明書の40桁SHA-1フィンガープリントをその実行に渡します。
+When exactly one certificate is available, its public fingerprint is pinned in the Git-ignored `Support/Signing.local` file. Future builds require the same certificate and stop instead of silently switching identities. If several certificates are present on first use, pass the exact 40-character SHA-1 certificate fingerprint for that invocation:
 
 ```sh
-POME_VISION_SIGNING_IDENTITY_HASH=0123456789ABCDEF0123456789ABCDEF01234567 \
+PHOTOTROPIN_SIGNING_IDENTITY_HASH=0123456789ABCDEF0123456789ABCDEF01234567 \
   ./scripts/build-app.sh
 ```
 
-秘密鍵や `.p12` / `.cer` はリポジトリへ保存しません。ルートの`.gitignore`が、秘密鍵、証明書、App Store Connectキー、ローカル署名設定、`.env`、キーチェーン、ビルド成果物をGit対象から外します。ソースを公開しても、作者や利用者の署名情報は含まれません。
-証明書を更新するときだけ `Support/Signing.local` を削除し、次回ビルドで新しい有1件を固定し直します。この切り替え時は画面収録の再許可が必要になる場合があります。
+Do not store private keys or `.p12` and `.cer` files in the repository. The root `.gitignore` excludes certificates, private keys, App Store Connect keys, local signing configuration, `.env` files, keychains, and build products. Publishing the source does not publish the author or user's signing identity.
 
-公開前には次の検査を実行します。
+To intentionally replace an expired or revoked certificate, remove `Support/Signing.local` and build again to pin the new certificate. macOS may require screen-recording permission to be granted again after this identity change.
+
+Before publishing, run:
 
 ```sh
 ./scripts/check-public-safety.sh
 ```
 
-この検査はGit公開候補だけを対象に、証明書・秘密鍵・ローカル設定が除外されていることと、ホームディレクトリ、メールアドレス、現在の証明書フィンガープリント、Team IDが混入していないことを確認します。GitHub上でも`Pome Vision checks`ワークフローが秘密情報を使わず同じ検査と`swift test`を実行します。
+This checks only files that Git would publish. It verifies that credentials and machine-local signing files are ignored and rejects personal home paths, email addresses, the current signing fingerprint, and Team IDs. The `Phototropin checks` GitHub Actions workflow runs the same safety check and `swift test` without using repository secrets.
 
-初回の安定署名版に切り替えた後だけ、古いad-hoc版の「画面収録」許可をシステム設定から外し、新しい `.app` を起動して再許可してください。以後は同じBundle IDと同じ証明書を使い続けることで、再ビルドごとの許可切れを防ぎます。
+The app intentionally keeps the legacy Bundle ID `dev.pome.vision`. Changing it would make macOS treat Phototropin as a different app and could invalidate existing screen-recording permission. The first signed build may require you to remove permission granted to an older ad-hoc build, launch the new app, and grant permission once. Subsequent builds retain the same Bundle ID and signing identity so macOS can track them consistently.
 
-初回はスクリーンショット保存先（通常はデスクトップ）へのアクセス確認が表示される場合があります。標準スクリーンショットの保存先がクリップボードだけに設定されている場合、自動監視では検出できないため、アプリの「範囲を撮影して回答」を使ってください。
+On first use, macOS may also ask for access to the screenshot destination, which is usually the Desktop. If standard screenshots are configured to copy only to the clipboard, automatic monitoring cannot detect them; use Phototropin's region-capture button instead.
 
-## 開発者向けCLI検証
+## CLI verification
 
 ```sh
-swift run pome-vision-cli /path/to/problem.png
-swift run pome-vision-cli --ocr-only /path/to/problem.png
-swift run pome-vision-cli --text "Video - Example title"
-swift run pome-vision-cli --describe-text "Video - Example title"
-swift run pome-vision-cli --describe-image /path/to/photo.png image-capable-model-id
-swift run pome-vision-cli --dialogue-text $'Hello.\nHi. Nice to meet you.'
+swift run phototropin-cli /path/to/problem.png
+swift run phototropin-cli --ocr-only /path/to/problem.png
+swift run phototropin-cli --text "Video - Example title"
+swift run phototropin-cli --describe-text "Video - Example title"
+swift run phototropin-cli --describe-image /path/to/photo.png image-capable-model-id
+swift run phototropin-cli --dialogue-text $'Hello.\nHi. Nice to meet you.'
 ```
 
-CLIはOCRやモデル応答を切り分けるための開発用です。`--text`は画像を使わず任意のOCR文を渡し、「これは何？」ボタン対象の判定まで表示します。`--describe-text`はOCRだけを使う説明生成、`--describe-image`は画像対応モデルへ画像そのものを渡す説明生成、`--dialogue-text`は複数発話を推定対話として整理する経路を検証します。通常利用では実行する必要はありません。モデル名を省略すると、LM Studioの `/api/v1/models` が返したLLM一覧の先頭を使います。
+The CLI is intended for development diagnostics rather than normal use. `--text` supplies arbitrary OCR text without an image and reports whether the content-explanation action should be offered. `--describe-text` tests OCR-only explanation, `--describe-image` sends an image to a vision-capable model, and `--dialogue-text` tests inferred multi-speaker organization. If the model argument is omitted, the CLI uses the first LLM returned by LM Studio's `/api/v1/models` endpoint.
 
-## 構成
+## Repository structure
 
-- `Sources/ScreenshotAnswerCore/` — OCR、プロンプト、LM Studio OpenAI互換クライアント、処理パイプライン。AppKit UIから独立して再利用する中心API
-- `Sources/ScreenshotAnswerApp/` — メニューバー設定、Pome Visionブランドマーク、保存先監視、範囲撮影、左下回答オーバーレイ、ScreenCaptureKitシステム音声、SpeechTranscriber、クリップボード
-- `Support/AppIcon.svg` — Finder用カラーアプリアイコンの編集可能なSVG原本
-- `Sources/ScreenshotAnswerCLI/` — 1画像を処理する検証用CLI
-- `Tests/` — 読み順、localhost制約、プロンプト境界、パイプラインの回帰テスト
-- `scripts/build-app.sh` — login keychainのApple Development証明書を厳密に選択し、ad-hoc署名を禁止するローカルビルド
-- `scripts/check-public-safety.sh` — Git公開候補へ個人パス・メール・署名識別子・credential形式が混入していないことを検査
+- `Sources/ScreenshotAnswerCore/` contains OCR, prompt boundaries, the LM Studio OpenAI-compatible client, and the reusable processing pipeline. It does not depend on the AppKit UI.
+- `Sources/ScreenshotAnswerApp/` contains the menu-bar interface, Phototropin branding, screenshot monitoring, region capture, answer overlays, ScreenCaptureKit system audio, SpeechTranscriber integration, settings, and clipboard behavior.
+- `Sources/ScreenshotAnswerCLI/` contains the single-image diagnostic CLI.
+- `Support/AppIcon.svg` is the editable source for the full-color Finder icon.
+- `Tests/` covers reading order, loopback restrictions, prompt boundaries, LM Studio request shapes, overlays, transcripts, and pipeline behavior.
+- `scripts/build-app.sh` selects a login-keychain Apple Development identity, rejects ad-hoc signing, builds the app bundle, and verifies its signature.
+- `scripts/check-public-safety.sh` checks publishable files for credentials, personal paths, email addresses, and local signing identifiers.
 
-## 現在の制約
+## Current limitations
 
-- 自動検出は、対応画像拡張子かつ既知のスクリーンショット名で保存された新規ファイルが対象です。OS言語によって名前が異なる場合は `ScreenshotFileClassifier` に接頭辞を追加してください。
-- 通常の問題回答はOCRを使います。「これは何？ 内容を説明」では画像を最大1600px・JPEGへ縮小し、OpenAI互換の `image_url` data URLとして選択したローカルLM Studioモデルへ直接渡します。図・数式・細部の説明精度はモデルによって異なります。
-- システム音声は選択した英語または日本語として認識します。複数言語が頻繁に入れ替わる音声やDRM保護コンテンツは正確に取得できない場合があります。
-- Draft Modelはメインモデルと語彙互換である必要があり、組み合わせによっては速くならないか、LM Studioが要求を拒否します。MTP/DSparkの切替はLM Studio側で行ってください。
-- `swift test`やCLIのOCR成功は、標準撮影監視・権限ダイアログ・左下ポップアップまで含むGUI動作の証明ではありません。最終確認は実際の`.app`起動後に行ってください。
+- Automatic monitoring only detects supported image extensions with recognized screenshot filename prefixes. Add OS-specific prefixes to `ScreenshotFileClassifier` when needed.
+- Normal question answering relies on OCR. Content explanation resizes the source image to a maximum of 1600 pixels, encodes it as JPEG, and supplies it as an OpenAI-compatible `image_url` data URL to the selected local LM Studio model. Accuracy for diagrams, equations, and small details depends on the model.
+- System audio is transcribed as the selected English or Japanese language. Rapid language switching and DRM-protected content may not be captured accurately.
+- A Draft Model must be vocabulary-compatible with the main model. Some combinations provide no speedup or are rejected by LM Studio. Configure MTP and DSpark in LM Studio.
+- Passing `swift test` or a CLI OCR check does not prove screenshot monitoring, permission prompts, overlays, audio capture, or the full GUI flow. Verify those paths by launching the signed `.app` before distributing a binary.

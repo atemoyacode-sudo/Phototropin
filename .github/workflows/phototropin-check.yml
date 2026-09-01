@@ -1,4 +1,4 @@
-name: Pome Vision checks
+name: Phototropin checks
 
 on:
   pull_request:

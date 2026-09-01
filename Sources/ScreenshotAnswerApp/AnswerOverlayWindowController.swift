@@ -106,7 +106,7 @@ private struct AnswerOverlayCard: View {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
                     .foregroundStyle(.tint)
-                Text("Pome Vision")
+                Text("Phototropin")
                     .font(.headline)
                 Spacer()
                 Button(action: onCopy) {

@@ -4,11 +4,11 @@ set -euo pipefail
 SCRIPT_DIR=${0:A:h}
 PROJECT_DIR=${SCRIPT_DIR:h}
 DIST_DIR="$PROJECT_DIR/dist"
-APP_DIR="$DIST_DIR/Pome Vision.app"
-ARCHIVE_PATH="$DIST_DIR/Pome Vision.zip"
+APP_DIR="$DIST_DIR/Phototropin.app"
+ARCHIVE_PATH="$DIST_DIR/Phototropin.zip"
 CONTENTS_DIR="$APP_DIR/Contents"
-ICONSET_DIR="$PROJECT_DIR/.build/PomeVision.iconset"
-ICON_SOURCE="$PROJECT_DIR/.build/PomeVision-AppIcon-1024.png"
+ICONSET_DIR="$PROJECT_DIR/.build/Phototropin.iconset"
+ICON_SOURCE="$PROJECT_DIR/.build/Phototropin-AppIcon-1024.png"
 EXPECTED_BUNDLE_ID="dev.pome.vision"
 SIGNING_CONFIG_PATH="$PROJECT_DIR/Support/Signing.local"
 
@@ -20,7 +20,9 @@ fail() {
 # TCCの画面収録許可を再ビルド後も安定して追跡できるよう、ad-hoc署名は許可しない。
 # 秘密鍵や証明書をリポジトリに保存せず、login keychain内のApple Development証明書を使う。
 IDENTITY_LIST=$(/usr/bin/security find-identity -v -p codesigning)
-SIGNING_IDENTITY_HASH=${POME_VISION_SIGNING_IDENTITY_HASH:-}
+# Accept the old variable for one transition release, while documenting and
+# preferring the new Phototropin name.
+SIGNING_IDENTITY_HASH=${PHOTOTROPIN_SIGNING_IDENTITY_HASH:-${POME_VISION_SIGNING_IDENTITY_HASH:-}}
 SHOULD_PIN_IDENTITY=false
 
 if [[ -z "$SIGNING_IDENTITY_HASH" && -f "$SIGNING_CONFIG_PATH" ]]; then
@@ -30,7 +32,7 @@ fi
 if [[ -n "$SIGNING_IDENTITY_HASH" ]]; then
     SIGNING_IDENTITY_HASH=$(printf '%s' "$SIGNING_IDENTITY_HASH" | /usr/bin/tr '[:lower:]' '[:upper:]')
     printf '%s\n' "$SIGNING_IDENTITY_HASH" | /usr/bin/grep -Eq '^[0-9A-F]{40}$' \
-        || fail "POME_VISION_SIGNING_IDENTITY_HASH must be a 40-character certificate SHA-1 hash."
+        || fail "PHOTOTROPIN_SIGNING_IDENTITY_HASH must be a 40-character certificate SHA-1 hash."
 else
     typeset -a APPLE_DEVELOPMENT_IDENTITIES
     APPLE_DEVELOPMENT_IDENTITIES=()
@@ -47,7 +49,7 @@ else
             SHOULD_PIN_IDENTITY=true
             ;;
         *)
-            fail "Multiple Apple Development identities were found. Set POME_VISION_SIGNING_IDENTITY_HASH to the exact certificate hash to choose one."
+            fail "Multiple Apple Development identities were found. Set PHOTOTROPIN_SIGNING_IDENTITY_HASH to the exact certificate hash to choose one."
             ;;
     esac
 fi
@@ -67,11 +69,11 @@ BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PROJECT_DIR
     || fail "Unexpected bundle identifier '$BUNDLE_ID'; expected '$EXPECTED_BUNDLE_ID'. Refusing to sign a different app."
 
 cd "$PROJECT_DIR"
-swift build -c release --product PomeVision
+swift build -c release --product Phototropin
 
 rm -rf "$APP_DIR"
 mkdir -p "$CONTENTS_DIR/MacOS" "$CONTENTS_DIR/Resources"
-cp ".build/release/PomeVision" "$CONTENTS_DIR/MacOS/PomeVision"
+cp ".build/release/Phototropin" "$CONTENTS_DIR/MacOS/Phototropin"
 cp "Support/Info.plist" "$CONTENTS_DIR/Info.plist"
 
 rm -rf "$ICONSET_DIR"

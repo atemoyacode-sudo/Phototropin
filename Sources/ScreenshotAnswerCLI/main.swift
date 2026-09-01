@@ -2,14 +2,14 @@ import Foundation
 import ScreenshotAnswerCore
 
 @main
-enum PomeVisionCLI {
+enum PhototropinCLI {
     static func main() async {
         guard CommandLine.arguments.count >= 2 else {
-            fputs("Usage: pome-vision-cli [--ocr-only] <image-path> [lm-studio-model]\n", stderr)
-            fputs("       pome-vision-cli --text <ocr-text> [lm-studio-model]\n", stderr)
-            fputs("       pome-vision-cli --describe-text <ocr-text> [lm-studio-model]\n", stderr)
-            fputs("       pome-vision-cli --describe-image <image-path> [lm-studio-model]\n", stderr)
-            fputs("       pome-vision-cli --dialogue-text <transcript> [lm-studio-model]\n", stderr)
+            fputs("Usage: phototropin-cli [--ocr-only] <image-path> [lm-studio-model]\n", stderr)
+            fputs("       phototropin-cli --text <ocr-text> [lm-studio-model]\n", stderr)
+            fputs("       phototropin-cli --describe-text <ocr-text> [lm-studio-model]\n", stderr)
+            fputs("       phototropin-cli --describe-image <image-path> [lm-studio-model]\n", stderr)
+            fputs("       phototropin-cli --dialogue-text <transcript> [lm-studio-model]\n", stderr)
             exit(EXIT_FAILURE)
         }
 

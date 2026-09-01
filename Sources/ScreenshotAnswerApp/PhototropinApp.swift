@@ -3,21 +3,21 @@ import ScreenshotAnswerCore
 import SwiftUI
 
 @main
-struct PomeVisionApp: App {
+struct PhototropinApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
         MenuBarExtra {
-            PomeVisionPanel(model: model)
+            PhototropinPanel(model: model)
         } label: {
-            PomeVisionMenuBarIcon(isRecording: model.isListeningToSystemAudio)
-                .accessibilityLabel("Pome Vision")
+            PhototropinMenuBarIcon(isRecording: model.isListeningToSystemAudio)
+                .accessibilityLabel("Phototropin")
         }
         .menuBarExtraStyle(.window)
     }
 }
 
-private struct PomeVisionPanel: View {
+private struct PhototropinPanel: View {
     @ObservedObject var model: AppModel
     @State private var isRecognizedTextExpanded = false
     @State private var isAnswerExpanded = false

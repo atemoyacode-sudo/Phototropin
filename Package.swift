@@ -3,14 +3,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "PomeVision",
+    name: "Phototropin",
     platforms: [
         .macOS(.v14),
     ],
     products: [
         .library(name: "ScreenshotAnswerCore", targets: ["ScreenshotAnswerCore"]),
-        .executable(name: "PomeVision", targets: ["ScreenshotAnswerApp"]),
-        .executable(name: "pome-vision-cli", targets: ["ScreenshotAnswerCLI"]),
+        .executable(name: "Phototropin", targets: ["ScreenshotAnswerApp"]),
+        .executable(name: "phototropin-cli", targets: ["ScreenshotAnswerCLI"]),
     ],
     targets: [
         .target(

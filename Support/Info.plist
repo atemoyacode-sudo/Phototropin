@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>ja</string>
     <key>CFBundleExecutable</key>
-    <string>PomeVision</string>
+    <string>Phototropin</string>
     <key>CFBundleIdentifier</key>
     <string>dev.pome.vision</string>
     <key>CFBundleIconFile</key>
@@ -13,7 +13,7 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Pome Vision</string>
+    <string>Phototropin</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

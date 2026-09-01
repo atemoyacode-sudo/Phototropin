@@ -28,7 +28,7 @@ typeset -a REQUIRED_IGNORES=(
     ".DS_Store"
     "Sources/.DS_Store"
     ".build/example"
-    "dist/Pome Vision.app"
+    "dist/Phototropin.app"
 )
 
 for ignored_path in "${REQUIRED_IGNORES[@]}"; do
@@ -48,7 +48,7 @@ done < <(
 )
 
 (( ${#CANDIDATES[@]} > 0 )) \
-    || fail "No publishable Pome Vision source files were found."
+    || fail "No publishable Phototropin source files were found."
 
 typeset -a LOCAL_IDENTIFIERS=()
 SIGNING_CONFIG_PATH="$PROJECT_DIR/Support/Signing.local"
@@ -66,7 +66,7 @@ done < <(
         | /usr/bin/sed -n 's/^.*"\(Apple Development:.*\)".*$/\1/p'
 )
 
-BUILT_APP="$PROJECT_DIR/dist/Pome Vision.app"
+BUILT_APP="$PROJECT_DIR/dist/Phototropin.app"
 if [[ -d "$BUILT_APP" ]]; then
     SIGNATURE_DETAILS=$(/usr/bin/codesign --display --verbose=4 "$BUILT_APP" 2>&1 || true)
     LOCAL_TEAM_ID=$(printf '%s\n' "$SIGNATURE_DETAILS" \

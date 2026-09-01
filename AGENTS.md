@@ -1,6 +1,6 @@
-# Pome Vision project guide
+# Phototropin project guide
 
-Pome Vision is a standalone macOS menu-bar prototype. It uses Apple Vision for
+Phototropin is a standalone macOS menu-bar prototype. It uses Apple Vision for
 local screenshot OCR, SpeechTranscriber for on-device English/Japanese system
 audio transcription on macOS 26 or later, and a loopback-only LM Studio server
 for answers and image descriptions.
@@ -18,6 +18,10 @@ Keep these boundaries intact:
 - Audio buffers are not persisted. Signing identities remain in the login
   keychain; `Support/Signing.local` stores only a public certificate hash and is
   ignored by Git.
+- Keep the legacy bundle identifier `dev.pome.vision` unchanged so macOS can
+  continue matching existing screen-recording permission. New preference keys
+  use the `Phototropin.` prefix and must migrate corresponding `PomeVision.`
+  values before they are read.
 - Preserve the reusable overlay panel setup in `OverlayWindowSupport`; each
   controller remains responsible for its own placement, content, and state.
 

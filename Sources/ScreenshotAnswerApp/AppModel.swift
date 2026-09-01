@@ -69,6 +69,7 @@ final class AppModel: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
+        Keys.migrateLegacyValues(in: defaults)
         selectedModel = defaults.string(forKey: Keys.selectedModel) ?? ""
         speculativeDecodingMode = SpeculativeDecodingMode(
             rawValue: defaults.string(forKey: Keys.speculativeDecodingMode) ?? ""
@@ -462,7 +463,7 @@ final class AppModel: ObservableObject {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        let baseName = "Pome Vision \(formatter.string(from: Date()))"
+        let baseName = "Phototropin \(formatter.string(from: Date()))"
         var candidate = screenshotDirectory.appendingPathComponent(baseName).appendingPathExtension("png")
         var suffix = 2
         while FileManager.default.fileExists(atPath: candidate.path) {
@@ -517,14 +518,33 @@ final class AppModel: ObservableObject {
 }
 
 private enum Keys {
-    static let selectedModel = "PomeVision.selectedModel"
-    static let speculativeDecodingMode = "PomeVision.speculativeDecodingMode"
-    static let selectedDraftModel = "PomeVision.selectedDraftModel"
-    static let monitorsScreenshots = "PomeVision.monitorsScreenshots"
-    static let copiesAnswer = "PomeVision.copiesAnswer"
-    static let showsAnswerPopup = "PomeVision.showsAnswerPopup"
-    static let systemAudioLanguage = "PomeVision.systemAudioLanguage"
-    static let organizesMultipleSpeakers = "PomeVision.organizesMultipleSpeakers"
+    static let selectedModel = "Phototropin.selectedModel"
+    static let speculativeDecodingMode = "Phototropin.speculativeDecodingMode"
+    static let selectedDraftModel = "Phototropin.selectedDraftModel"
+    static let monitorsScreenshots = "Phototropin.monitorsScreenshots"
+    static let copiesAnswer = "Phototropin.copiesAnswer"
+    static let showsAnswerPopup = "Phototropin.showsAnswerPopup"
+    static let systemAudioLanguage = "Phototropin.systemAudioLanguage"
+    static let organizesMultipleSpeakers = "Phototropin.organizesMultipleSpeakers"
+
+    private static let migrations = [
+        (selectedModel, "PomeVision.selectedModel"),
+        (speculativeDecodingMode, "PomeVision.speculativeDecodingMode"),
+        (selectedDraftModel, "PomeVision.selectedDraftModel"),
+        (monitorsScreenshots, "PomeVision.monitorsScreenshots"),
+        (copiesAnswer, "PomeVision.copiesAnswer"),
+        (showsAnswerPopup, "PomeVision.showsAnswerPopup"),
+        (systemAudioLanguage, "PomeVision.systemAudioLanguage"),
+        (organizesMultipleSpeakers, "PomeVision.organizesMultipleSpeakers"),
+    ]
+
+    static func migrateLegacyValues(in defaults: UserDefaults) {
+        for (newKey, legacyKey) in migrations
+        where defaults.object(forKey: newKey) == nil {
+            guard let legacyValue = defaults.object(forKey: legacyKey) else { continue }
+            defaults.set(legacyValue, forKey: newKey)
+        }
+    }
 }
 
 enum SpeculativeDecodingMode: String, CaseIterable, Identifiable {
