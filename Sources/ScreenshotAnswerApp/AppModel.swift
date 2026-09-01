@@ -4,12 +4,23 @@ import ScreenshotAnswerCore
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var status = "起動中…"
+    @Published private var statusMessage = LocalizedInterfaceText(
+        japanese: "起動中…",
+        english: "Starting…"
+    )
+    @Published var interfaceLanguage: InterfaceLanguage {
+        didSet {
+            guard hasChosenInterfaceLanguage else { return }
+            UserDefaults.standard.set(interfaceLanguage.rawValue, forKey: Keys.interfaceLanguage)
+        }
+    }
+    @Published private(set) var hasChosenInterfaceLanguage: Bool
     @Published var recognizedText = ""
     @Published var answer = ""
     @Published private(set) var canDescribeRecognizedContent = false
     @Published private(set) var currentImageURL: URL?
     @Published var availableModels: [String] = []
+    @Published private(set) var availableModelInfos: [LMStudioModelInfo] = []
     @Published var selectedModel: String {
         didSet { UserDefaults.standard.set(selectedModel, forKey: Keys.selectedModel) }
     }
@@ -36,6 +47,12 @@ final class AppModel: ObservableObject {
     @Published var showsAnswerPopup: Bool {
         didSet { UserDefaults.standard.set(showsAnswerPopup, forKey: Keys.showsAnswerPopup) }
     }
+    @Published var captureStorageMode: CaptureStorageMode {
+        didSet {
+            UserDefaults.standard.set(captureStorageMode.rawValue, forKey: Keys.captureStorageMode)
+        }
+    }
+    @Published private(set) var customCaptureDirectoryPath: String?
     @Published var systemAudioLanguage: SystemAudioLanguage {
         didSet { UserDefaults.standard.set(systemAudioLanguage.rawValue, forKey: Keys.systemAudioLanguage) }
     }
@@ -63,13 +80,19 @@ final class AppModel: ObservableObject {
     private var timer: Timer?
     private var systemAudioTimer: Timer?
     private var seenImages = Set<URL>()
-    private var pendingImages: [URL] = []
+    private var pendingImages: [PendingImage] = []
     private let startedAt = Date()
     private var didStart = false
+
+    var status: String { statusMessage.value(for: interfaceLanguage) }
 
     init() {
         let defaults = UserDefaults.standard
         Keys.migrateLegacyValues(in: defaults)
+        interfaceLanguage = InterfaceLanguage(
+            rawValue: defaults.string(forKey: Keys.interfaceLanguage) ?? ""
+        ) ?? .japanese
+        hasChosenInterfaceLanguage = defaults.bool(forKey: Keys.hasChosenInterfaceLanguage)
         selectedModel = defaults.string(forKey: Keys.selectedModel) ?? ""
         speculativeDecodingMode = SpeculativeDecodingMode(
             rawValue: defaults.string(forKey: Keys.speculativeDecodingMode) ?? ""
@@ -78,6 +101,10 @@ final class AppModel: ObservableObject {
         monitorsScreenshots = defaults.object(forKey: Keys.monitorsScreenshots) as? Bool ?? true
         copiesAnswer = defaults.object(forKey: Keys.copiesAnswer) as? Bool ?? false
         showsAnswerPopup = defaults.object(forKey: Keys.showsAnswerPopup) as? Bool ?? true
+        captureStorageMode = CaptureStorageMode(
+            rawValue: defaults.string(forKey: Keys.captureStorageMode) ?? ""
+        ) ?? .screenshotFolder
+        customCaptureDirectoryPath = defaults.string(forKey: Keys.customCaptureDirectoryPath)
         systemAudioLanguage = SystemAudioLanguage(
             rawValue: defaults.string(forKey: Keys.systemAudioLanguage) ?? ""
         ) ?? .english
@@ -89,36 +116,72 @@ final class AppModel: ObservableObject {
         Task { @MainActor [weak self] in self?.start() }
     }
 
+    func chooseInterfaceLanguage(_ language: InterfaceLanguage) {
+        interfaceLanguage = language
+        hasChosenInterfaceLanguage = true
+        UserDefaults.standard.set(language.rawValue, forKey: Keys.interfaceLanguage)
+        UserDefaults.standard.set(true, forKey: Keys.hasChosenInterfaceLanguage)
+    }
+
+    private func setStatus(_ japanese: String, _ english: String) {
+        statusMessage = LocalizedInterfaceText(japanese: japanese, english: english)
+    }
+
+    private func setFailureStatus(
+        japanesePrefix: String,
+        englishPrefix: String,
+        error: Error
+    ) {
+        statusMessage = LocalizedInterfaceText(
+            japanese: "\(japanesePrefix): \(error.localizedDescription)",
+            english: "\(englishPrefix): \(InterfaceLanguage.english.errorDescription(for: error))"
+        )
+    }
+
     func start() {
         guard !didStart else { return }
         didStart = true
         seedSeenImages()
-        if monitorsScreenshots { startMonitor() }
-        Task { await refreshModels() }
+        Task {
+            await refreshModels()
+            if monitorsScreenshots { startMonitor() }
+        }
     }
 
     func refreshModels() async {
-        status = "LM Studioモデルを確認中…"
+        setStatus("LM Studioモデルを確認中…", "Checking LM Studio models…")
         do {
-            let models = try await generator.availableModels()
-            availableModels = models
-            if selectedModel.isEmpty || !models.contains(selectedModel) {
-                selectedModel = models.first ?? ""
+            let modelInfos = try await generator.availableModelInfos()
+            availableModelInfos = modelInfos
+            availableModels = modelInfos.map(\.key)
+            if selectedModel.isEmpty || !availableModels.contains(selectedModel) {
+                selectedModel = availableModels.first ?? ""
             }
             normalizeDraftModelSelection()
-            status = models.isEmpty
-                ? ScreenshotAnswerError.noLMStudioModel.localizedDescription
-                : "スクリーンショットを待っています"
+            if availableModels.isEmpty {
+                let error = ScreenshotAnswerError.noLMStudioModel
+                statusMessage = LocalizedInterfaceText(
+                    japanese: error.localizedDescription,
+                    english: InterfaceLanguage.english.errorDescription(for: error)
+                )
+            } else {
+                setStatus("スクリーンショットを待っています", "Waiting for a screenshot")
+            }
         } catch {
             availableModels = []
-            status = error.localizedDescription
+            availableModelInfos = []
+            statusMessage = LocalizedInterfaceText(
+                japanese: error.localizedDescription,
+                english: InterfaceLanguage.english.errorDescription(for: error)
+            )
         }
     }
 
     func captureSelection() {
         guard !isBusy else { return }
-        let imageURL = nextCaptureURL()
-        status = "範囲を選択してください…"
+        guard let pendingImage = nextCapture() else { return }
+        let imageURL = pendingImage.url
+        setStatus("範囲を選択してください…", "Select an area…")
         hideWindowsForCapture()
 
         Task {
@@ -127,11 +190,35 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 180_000_000)
             let captured = await Self.captureSelection(to: imageURL)
             guard captured else {
-                status = "撮影をキャンセルしました"
+                setStatus("撮影をキャンセルしました", "Capture canceled")
                 return
             }
-            enqueue(imageURL)
+            enqueue(imageURL, deleteAfterProcessing: pendingImage.deleteAfterProcessing)
         }
+    }
+
+    func chooseCustomCaptureDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = interfaceLanguage.text("範囲撮影の保存先を選択", "Choose Capture Folder")
+        panel.prompt = interfaceLanguage.text("選択", "Choose")
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        if let customCaptureDirectoryPath {
+            panel.directoryURL = URL(fileURLWithPath: customCaptureDirectoryPath, isDirectory: true)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        customCaptureDirectoryPath = url.path
+        captureStorageMode = .customFolder
+        UserDefaults.standard.set(url.path, forKey: Keys.customCaptureDirectoryPath)
+    }
+
+    var customCaptureDirectoryDisplayName: String {
+        guard let customCaptureDirectoryPath else {
+            return interfaceLanguage.text("フォルダが未選択です", "No folder selected")
+        }
+        return URL(fileURLWithPath: customCaptureDirectoryPath).lastPathComponent
     }
 
     private func hideWindowsForCapture() {
@@ -146,7 +233,7 @@ final class AppModel: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         if pasteboard.setString(answer, forType: .string) {
-            status = "回答をコピーしました"
+            setStatus("回答をコピーしました", "Answer copied")
         }
     }
 
@@ -162,7 +249,7 @@ final class AppModel: ObservableObject {
         let options = generationOptions
         isBusy = true
         canDescribeRecognizedContent = false
-        status = "内容を説明中…"
+        setStatus("内容を説明中…", "Explaining the content…")
 
         Task {
             do {
@@ -191,20 +278,33 @@ final class AppModel: ObservableObject {
                     )
                 }
                 answer = AnswerResponseClassifier.displayText(generated)
-                status = "内容を説明しました"
+                setStatus("内容を説明しました", "Content explained")
                 if copiesAnswer { copyAnswer() }
                 if showsAnswerPopup {
                     overlayController.show(
                         answer: answer,
                         recognizedText: text.isEmpty
-                            ? "画像（文字は検出されませんでした）"
+                            ? interfaceLanguage.text(
+                                "画像（文字は検出されませんでした）",
+                                "Image (no text was detected)"
+                            )
                             : text,
+                        language: interfaceLanguage,
                         onCopy: { [weak self] in self?.copyAnswer() }
                     )
                 }
             } catch {
-                status = "説明できませんでした: \(error.localizedDescription)"
-                if showsAnswerPopup { overlayController.showFailure(error.localizedDescription) }
+                setFailureStatus(
+                    japanesePrefix: "説明できませんでした",
+                    englishPrefix: "Could not explain the content",
+                    error: error
+                )
+                if showsAnswerPopup {
+                    overlayController.showFailure(
+                        interfaceLanguage.errorDescription(for: error),
+                        language: interfaceLanguage
+                    )
+                }
             }
             isBusy = false
             processNextIfNeeded()
@@ -212,7 +312,15 @@ final class AppModel: ObservableObject {
     }
 
     func openScreenshotDirectory() {
-        NSWorkspace.shared.open(screenshotDirectory)
+        if captureStorageMode == .customFolder,
+           let customCaptureDirectoryPath {
+            NSWorkspace.shared.open(URL(
+                fileURLWithPath: customCaptureDirectoryPath,
+                isDirectory: true
+            ))
+        } else {
+            NSWorkspace.shared.open(screenshotDirectory)
+        }
     }
 
     func scanNow() {
@@ -232,7 +340,7 @@ final class AppModel: ObservableObject {
         isBusy = true
         audioTranscript = ""
         audioElapsedSeconds = 0
-        status = "音声認識モデルを準備中…"
+        setStatus("音声認識モデルを準備中…", "Preparing the speech recognition model…")
         let language = systemAudioLanguage
 
         Task {
@@ -249,12 +357,13 @@ final class AppModel: ObservableObject {
                 )
                 isListeningToSystemAudio = true
                 isBusy = false
-                status = "🔴 システム音声を聞いています"
+                setStatus("🔴 システム音声を聞いています", "🔴 Listening to system audio")
                 startSystemAudioTimer()
                 hideWindowsForCapture()
                 recordingOverlayController.show(
                     elapsedText: systemAudioElapsedText,
-                    language: language.label,
+                    language: language.label(for: interfaceLanguage),
+                    interfaceLanguage: interfaceLanguage,
                     question: audioQuestion,
                     transcript: audioTranscript,
                     organizesMultipleSpeakers: organizesMultipleSpeakers,
@@ -262,7 +371,11 @@ final class AppModel: ObservableObject {
                 )
             } catch {
                 isBusy = false
-                status = "音声を取得できません: \(error.localizedDescription)"
+                setFailureStatus(
+                    japanesePrefix: "音声を取得できません",
+                    englishPrefix: "Could not capture audio",
+                    error: error
+                )
             }
         }
     }
@@ -273,7 +386,7 @@ final class AppModel: ObservableObject {
         isListeningToSystemAudio = false
         isBusy = true
         stopSystemAudioTimer()
-        status = "音声を文字起こし中…"
+        setStatus("音声を文字起こし中…", "Transcribing audio…")
 
         Task {
             do {
@@ -281,8 +394,17 @@ final class AppModel: ObservableObject {
                 audioTranscript = transcript
                 try await generateAudioAnswer()
             } catch {
-                status = "音声を処理できません: \(error.localizedDescription)"
-                if showsAnswerPopup { overlayController.showFailure(error.localizedDescription) }
+                setFailureStatus(
+                    japanesePrefix: "音声を処理できません",
+                    englishPrefix: "Could not process audio",
+                    error: error
+                )
+                if showsAnswerPopup {
+                    overlayController.showFailure(
+                        interfaceLanguage.errorDescription(for: error),
+                        language: interfaceLanguage
+                    )
+                }
             }
             isBusy = false
             processNextIfNeeded()
@@ -298,8 +420,17 @@ final class AppModel: ObservableObject {
             do {
                 try await generateAudioAnswer()
             } catch {
-                status = "音声について回答できません: \(error.localizedDescription)"
-                if showsAnswerPopup { overlayController.showFailure(error.localizedDescription) }
+                setFailureStatus(
+                    japanesePrefix: "音声について回答できません",
+                    englishPrefix: "Could not answer about the audio",
+                    error: error
+                )
+                if showsAnswerPopup {
+                    overlayController.showFailure(
+                        interfaceLanguage.errorDescription(for: error),
+                        language: interfaceLanguage
+                    )
+                }
             }
             isBusy = false
             processNextIfNeeded()
@@ -310,7 +441,7 @@ final class AppModel: ObservableObject {
         guard !selectedModel.isEmpty else {
             throw ScreenshotAnswerError.noLMStudioModel
         }
-        status = "音声の内容を考え中…"
+        setStatus("音声の内容を考え中…", "Thinking about the audio…")
         let screenshotContext = recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
         let generated = try await generator.answerAboutAudio(
             transcript: audioTranscript,
@@ -322,12 +453,16 @@ final class AppModel: ObservableObject {
         )
         answer = AnswerResponseClassifier.displayText(generated)
         canDescribeRecognizedContent = false
-        status = "音声の内容へ回答しました"
+        setStatus("音声の内容へ回答しました", "Answered about the audio")
         if copiesAnswer { copyAnswer() }
         if showsAnswerPopup {
             overlayController.show(
                 answer: answer,
-                recognizedText: "音声文字起こし: \(audioTranscript)",
+                recognizedText: interfaceLanguage.text(
+                    "音声文字起こし: \(audioTranscript)",
+                    "Audio transcript: \(audioTranscript)"
+                ),
+                language: interfaceLanguage,
                 onCopy: { [weak self] in self?.copyAnswer() }
             )
         }
@@ -358,7 +493,7 @@ final class AppModel: ObservableObject {
 
     private func startMonitor() {
         guard didStart, timer == nil else { return }
-        status = "スクリーンショットを待っています"
+        setStatus("スクリーンショットを待っています", "Waiting for a screenshot")
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.scanForNewScreenshots() }
         }
@@ -368,7 +503,7 @@ final class AppModel: ObservableObject {
     private func stopMonitor() {
         timer?.invalidate()
         timer = nil
-        if didStart { status = "自動監視は停止中です" }
+        if didStart { setStatus("自動監視は停止中です", "Automatic monitoring is off") }
     }
 
     private func seedSeenImages() {
@@ -401,32 +536,49 @@ final class AppModel: ObservableObject {
             ?? .distantPast
     }
 
-    private func enqueue(_ imageURL: URL) {
+    private func enqueue(_ imageURL: URL, deleteAfterProcessing: Bool = false) {
         guard !seenImages.contains(imageURL) else { return }
         seenImages.insert(imageURL)
-        pendingImages.append(imageURL)
+        pendingImages.append(PendingImage(
+            url: imageURL,
+            deleteAfterProcessing: deleteAfterProcessing
+        ))
         processNextIfNeeded()
     }
 
     private func processNextIfNeeded() {
         guard !isBusy, !pendingImages.isEmpty else { return }
         guard !selectedModel.isEmpty else {
-            status = ScreenshotAnswerError.noLMStudioModel.localizedDescription
-            pendingImages.removeAll()
+            let error = ScreenshotAnswerError.noLMStudioModel
+            statusMessage = LocalizedInterfaceText(
+                japanese: error.localizedDescription,
+                english: InterfaceLanguage.english.errorDescription(for: error)
+            )
+            removeTemporaryPendingImages()
             return
         }
 
-        let imageURL = pendingImages.removeFirst()
+        let pendingImage = pendingImages.removeFirst()
+        let imageURL = pendingImage.url
         let model = selectedModel
         let options = generationOptions
         isBusy = true
-        status = "文字を認識中…"
+        setStatus("文字を認識中…", "Recognizing text…")
         recognizedText = ""
         answer = ""
         canDescribeRecognizedContent = false
         currentImageURL = imageURL
 
         Task {
+            defer {
+                if pendingImage.deleteAfterProcessing {
+                    try? FileManager.default.removeItem(at: imageURL)
+                    seenImages.remove(imageURL)
+                    if currentImageURL == imageURL { currentImageURL = nil }
+                }
+                isBusy = false
+                processNextIfNeeded()
+            }
             do {
                 let result = try await pipeline.process(
                     imageURL: imageURL,
@@ -434,45 +586,122 @@ final class AppModel: ObservableObject {
                     options: options
                 )
                 recognizedText = result.recognizedText
-                status = "回答を生成しました"
-                answer = result.answer
-                canDescribeRecognizedContent = result.offersContentExplanation
+                var resolvedAnswer = result.answer
+                if result.offersContentExplanation {
+                    if availableModelInfos.isEmpty,
+                       let modelInfos = try? await generator.availableModelInfos() {
+                        availableModelInfos = modelInfos
+                        availableModels = modelInfos.map(\.key)
+                    }
+                    if let visionModel = LMStudioVisionModelSelector.closestVisionModel(
+                        to: model,
+                        among: availableModelInfos
+                    ) {
+                        setStatus("画像の内容を自動説明中…", "Automatically explaining the image…")
+                        resolvedAnswer = try await generator.describeImage(
+                            imageURL: imageURL,
+                            recognizedText: result.recognizedText,
+                            model: visionModel.key,
+                            options: LMStudioGenerationOptions()
+                        )
+                        setStatus("画像の内容を説明しました", "Image explained")
+                    } else {
+                        resolvedAnswer = interfaceLanguage.text(
+                            "OCR内に質問がなく、Visionモデルがなかったため回答を停止しました。",
+                            "No question was found in the OCR text, and no vision model was available, so answering was stopped."
+                        )
+                        setStatus("Visionモデルがないため停止しました", "Stopped because no vision model is available")
+                    }
+                } else {
+                    setStatus("回答を生成しました", "Answer generated")
+                }
+                answer = AnswerResponseClassifier.displayText(resolvedAnswer)
+                canDescribeRecognizedContent = false
                 if copiesAnswer { copyAnswer() }
                 if showsAnswerPopup {
                     overlayController.show(
-                        answer: result.answer,
+                        answer: answer,
                         recognizedText: result.recognizedText.isEmpty
-                            ? "画像（文字は検出されませんでした）"
+                            ? interfaceLanguage.text(
+                                "画像（文字は検出されませんでした）",
+                                "Image (no text was detected)"
+                            )
                             : result.recognizedText,
-                        onExplain: result.offersContentExplanation
-                            ? { [weak self] in self?.describeRecognizedContent() }
-                            : nil,
+                        language: interfaceLanguage,
                         onCopy: { [weak self] in self?.copyAnswer() }
                     )
                 }
             } catch {
-                status = "処理できませんでした: \(error.localizedDescription)"
-                if showsAnswerPopup { overlayController.showFailure(error.localizedDescription) }
+                setFailureStatus(
+                    japanesePrefix: "処理できませんでした",
+                    englishPrefix: "Could not process the screenshot",
+                    error: error
+                )
+                if showsAnswerPopup {
+                    overlayController.showFailure(
+                        interfaceLanguage.errorDescription(for: error),
+                        language: interfaceLanguage
+                    )
+                }
             }
-            isBusy = false
-            processNextIfNeeded()
         }
     }
 
-    private func nextCaptureURL() -> URL {
+    private func nextCapture() -> PendingImage? {
+        let directory: URL
+        let deleteAfterProcessing: Bool
+        switch captureStorageMode {
+        case .screenshotFolder:
+            directory = screenshotDirectory
+            deleteAfterProcessing = false
+        case .customFolder:
+            guard let customCaptureDirectoryPath else {
+                setStatus("保存先フォルダを選択してください", "Choose a capture folder first")
+                return nil
+            }
+            directory = URL(fileURLWithPath: customCaptureDirectoryPath, isDirectory: true)
+            deleteAfterProcessing = false
+        case .temporary:
+            directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("Phototropin-Captures", isDirectory: true)
+            deleteAfterProcessing = true
+        }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            setFailureStatus(
+                japanesePrefix: "撮影の保存先を準備できません",
+                englishPrefix: "Could not prepare the capture folder",
+                error: error
+            )
+            return nil
+        }
+
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         let baseName = "Phototropin \(formatter.string(from: Date()))"
-        var candidate = screenshotDirectory.appendingPathComponent(baseName).appendingPathExtension("png")
+        var candidate = directory.appendingPathComponent(baseName).appendingPathExtension("png")
         var suffix = 2
         while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = screenshotDirectory
+            candidate = directory
                 .appendingPathComponent("\(baseName) \(suffix)")
                 .appendingPathExtension("png")
             suffix += 1
         }
-        return candidate
+        return PendingImage(url: candidate, deleteAfterProcessing: deleteAfterProcessing)
+    }
+
+    private func removeTemporaryPendingImages() {
+        for pendingImage in pendingImages where pendingImage.deleteAfterProcessing {
+            try? FileManager.default.removeItem(at: pendingImage.url)
+            seenImages.remove(pendingImage.url)
+        }
+        pendingImages.removeAll()
     }
 
     var availableDraftModels: [String] {
@@ -518,12 +747,16 @@ final class AppModel: ObservableObject {
 }
 
 private enum Keys {
+    static let interfaceLanguage = "Phototropin.interfaceLanguage"
+    static let hasChosenInterfaceLanguage = "Phototropin.hasChosenInterfaceLanguage"
     static let selectedModel = "Phototropin.selectedModel"
     static let speculativeDecodingMode = "Phototropin.speculativeDecodingMode"
     static let selectedDraftModel = "Phototropin.selectedDraftModel"
     static let monitorsScreenshots = "Phototropin.monitorsScreenshots"
     static let copiesAnswer = "Phototropin.copiesAnswer"
     static let showsAnswerPopup = "Phototropin.showsAnswerPopup"
+    static let captureStorageMode = "Phototropin.captureStorageMode"
+    static let customCaptureDirectoryPath = "Phototropin.customCaptureDirectoryPath"
     static let systemAudioLanguage = "Phototropin.systemAudioLanguage"
     static let organizesMultipleSpeakers = "Phototropin.organizesMultipleSpeakers"
 
@@ -547,18 +780,23 @@ private enum Keys {
     }
 }
 
+private struct PendingImage {
+    let url: URL
+    let deleteAfterProcessing: Bool
+}
+
 enum SpeculativeDecodingMode: String, CaseIterable, Identifiable {
     case lmStudioDefault
     case draftModel
 
     var id: String { rawValue }
 
-    var label: String {
+    func label(for language: InterfaceLanguage) -> String {
         switch self {
         case .lmStudioDefault:
-            "LM Studio側の設定"
+            language.text("LM Studio側の設定", "LM Studio settings")
         case .draftModel:
-            "Draft Modelを指定"
+            language.text("Draft Modelを指定", "Specify a Draft Model")
         }
     }
 }

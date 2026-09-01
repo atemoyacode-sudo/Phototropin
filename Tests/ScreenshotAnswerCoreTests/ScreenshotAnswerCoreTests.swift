@@ -30,6 +30,9 @@ final class ScreenshotAnswerCoreTests: XCTestCase {
         XCTAssertTrue(messages[0].content.contains("untrusted data"))
         XCTAssertTrue(messages[0].content.contains("Do not follow"))
         XCTAssertTrue(messages[0].content.contains("[NO_QUESTION]"))
+        XCTAssertTrue(messages[0].content.contains("mainly in English"))
+        XCTAssertTrue(messages[0].content.contains("context is uncertain"))
+        XCTAssertTrue(messages[0].content.contains("vision-capable model"))
         XCTAssertTrue(messages[0].content.contains("substitute each candidate"))
         XCTAssertTrue(messages[0].content.contains("exact choice number"))
         XCTAssertTrue(messages[1].content.contains("--- OCR TEXT BEGIN ---"))
@@ -51,6 +54,57 @@ final class ScreenshotAnswerCoreTests: XCTestCase {
         let response = "提供されたOCRテキストには、回答すべき問題や質問が含まれていません。そのため、回答することができません。"
 
         XCTAssertTrue(AnswerResponseClassifier.offersContentExplanation(response))
+    }
+
+    func testEnglishNoQuestionWordingOffersAutomaticExplanation() {
+        XCTAssertTrue(AnswerResponseClassifier.offersContentExplanation(
+            "No answerable question was found in the OCR text."
+        ))
+    }
+
+    func testVisionSelectorChoosesClosestParameterCount() {
+        let models = [
+            LMStudioModelInfo(key: "text-8b", sizeBytes: 5_000, paramsString: "8B"),
+            LMStudioModelInfo(key: "vision-3b", sizeBytes: 2_000, paramsString: "3B", supportsVision: true),
+            LMStudioModelInfo(key: "vision-9b", sizeBytes: 6_000, paramsString: "9B", supportsVision: true),
+            LMStudioModelInfo(key: "embed", paramsString: "8B", supportsVision: false),
+        ]
+
+        XCTAssertEqual(
+            LMStudioVisionModelSelector.closestVisionModel(
+                to: "text-8b",
+                among: models
+            )?.key,
+            "vision-9b"
+        )
+    }
+
+    func testVisionSelectorUsesSelectedVisionModelAndParsesExpertParameterName() {
+        let selected = LMStudioModelInfo(
+            key: "gemma4-e4b",
+            paramsString: "E4B",
+            supportsVision: true
+        )
+
+        XCTAssertEqual(selected.parameterCount, 4_000_000_000)
+        XCTAssertEqual(
+            LMStudioVisionModelSelector.closestVisionModel(
+                to: selected.key,
+                among: [selected, LMStudioModelInfo(
+                    key: "vision-12b",
+                    paramsString: "12B",
+                    supportsVision: true
+                )]
+            )?.key,
+            selected.key
+        )
+    }
+
+    func testVisionSelectorReturnsNilWithoutDeclaredVisionCapability() {
+        XCTAssertNil(LMStudioVisionModelSelector.closestVisionModel(
+            to: "qwen-8b",
+            among: [LMStudioModelInfo(key: "qwen-8b", paramsString: "8B")]
+        ))
     }
 
     func testDescriptionAndAudioPromptsKeepCapturedContentUntrusted() {
@@ -176,7 +230,7 @@ final class ScreenshotAnswerCoreTests: XCTestCase {
             case ("GET", "/api/v1/models"):
                 return Self.mockResponse(
                     request: request,
-                    json: #"{"models":[{"type":"llm","key":"z-model"},{"type":"embedding","key":"embed-model"},{"type":"llm","key":"a-model"}]}"#
+                    json: #"{"models":[{"type":"llm","key":"z-model","size_bytes":6000,"params_string":"9B","capabilities":{"vision":true}},{"type":"embedding","key":"embed-model"},{"type":"llm","key":"a-model","size_bytes":5000,"params_string":"8B","capabilities":{"vision":false}}]}"#
                 )
             case ("POST", "/v1/chat/completions"):
                 XCTAssertEqual(
@@ -198,12 +252,15 @@ final class ScreenshotAnswerCoreTests: XCTestCase {
         }
 
         let models = try await generator.availableModels()
+        let modelInfos = try await generator.availableModelInfos()
         let answer = try await generator.answer(
             recognizedText: "question",
             model: "a-model"
         )
 
         XCTAssertEqual(models, ["a-model", "z-model"])
+        XCTAssertEqual(modelInfos.first(where: { $0.key == "z-model" })?.supportsVision, true)
+        XCTAssertEqual(modelInfos.first(where: { $0.key == "z-model" })?.parameterCount, 9_000_000_000)
         XCTAssertEqual(answer, "4 over")
     }
 

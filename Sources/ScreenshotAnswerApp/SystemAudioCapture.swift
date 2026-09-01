@@ -11,10 +11,10 @@ enum SystemAudioLanguage: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var label: String {
+    func label(for language: InterfaceLanguage) -> String {
         switch self {
-        case .english: "英語"
-        case .japanese: "日本語"
+        case .english: language.text("英語", "English")
+        case .japanese: language.text("日本語", "Japanese")
         }
     }
 

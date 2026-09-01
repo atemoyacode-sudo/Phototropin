@@ -1,5 +1,6 @@
 .build/
 dist/
+動画用/
 .swiftpm/
 *.xcodeproj/
 .DS_Store

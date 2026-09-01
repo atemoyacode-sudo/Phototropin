@@ -13,6 +13,117 @@ public protocol ScreenshotAnswerGenerating: Sendable {
     ) async throws -> String
 }
 
+public struct LMStudioModelInfo: Sendable, Equatable, Decodable {
+    public let type: String
+    public let key: String
+    public let displayName: String?
+    public let sizeBytes: Int64?
+    public let paramsString: String?
+    public let supportsVision: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case key
+        case displayName = "display_name"
+        case sizeBytes = "size_bytes"
+        case paramsString = "params_string"
+        case capabilities
+    }
+
+    private struct Capabilities: Decodable {
+        let vision: Bool?
+    }
+
+    public init(
+        type: String = "llm",
+        key: String,
+        displayName: String? = nil,
+        sizeBytes: Int64? = nil,
+        paramsString: String? = nil,
+        supportsVision: Bool = false
+    ) {
+        self.type = type
+        self.key = key
+        self.displayName = displayName
+        self.sizeBytes = sizeBytes
+        self.paramsString = paramsString
+        self.supportsVision = supportsVision
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        key = try container.decode(String.self, forKey: .key)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        sizeBytes = try container.decodeIfPresent(Int64.self, forKey: .sizeBytes)
+        paramsString = try container.decodeIfPresent(String.self, forKey: .paramsString)
+        supportsVision = try container
+            .decodeIfPresent(Capabilities.self, forKey: .capabilities)?
+            .vision ?? false
+    }
+
+    public var parameterCount: Double? {
+        guard let paramsString else { return nil }
+        let pattern = #"([0-9]+(?:\.[0-9]+)?)\s*([KMBT])"#
+        guard let expression = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.caseInsensitive]
+        ) else { return nil }
+        let range = NSRange(paramsString.startIndex..., in: paramsString)
+        guard let match = expression.firstMatch(in: paramsString, range: range),
+              let numberRange = Range(match.range(at: 1), in: paramsString),
+              let unitRange = Range(match.range(at: 2), in: paramsString),
+              let number = Double(paramsString[numberRange]) else { return nil }
+        let multiplier: Double = switch paramsString[unitRange].uppercased() {
+        case "K": 1_000
+        case "M": 1_000_000
+        case "B": 1_000_000_000
+        case "T": 1_000_000_000_000
+        default: 1
+        }
+        return number * multiplier
+    }
+}
+
+public enum LMStudioVisionModelSelector {
+    public static func closestVisionModel(
+        to selectedModel: String,
+        among models: [LMStudioModelInfo]
+    ) -> LMStudioModelInfo? {
+        let visionModels = models.filter { $0.type == "llm" && $0.supportsVision }
+        guard !visionModels.isEmpty else { return nil }
+        guard let reference = models.first(where: { $0.key == selectedModel }) else {
+            return visionModels.sorted { $0.key < $1.key }.first
+        }
+
+        return visionModels.min { lhs, rhs in
+            let lhsDistance = distance(from: reference, to: lhs)
+            let rhsDistance = distance(from: reference, to: rhs)
+            if lhsDistance == rhsDistance { return lhs.key < rhs.key }
+            return lhsDistance < rhsDistance
+        }
+    }
+
+    private static func distance(
+        from reference: LMStudioModelInfo,
+        to candidate: LMStudioModelInfo
+    ) -> Double {
+        if let referenceCount = reference.parameterCount,
+           let candidateCount = candidate.parameterCount,
+           referenceCount > 0,
+           candidateCount > 0 {
+            return abs(log(candidateCount / referenceCount))
+        }
+        if let referenceSize = reference.sizeBytes,
+           let candidateSize = candidate.sizeBytes,
+           referenceSize > 0,
+           candidateSize > 0 {
+            return abs(log(Double(candidateSize) / Double(referenceSize))) + 100
+        }
+        return candidate.key == reference.key ? 0 : Double.greatestFiniteMagnitude
+    }
+}
+
 public extension ScreenshotAnswerGenerating {
     func answer(recognizedText: String, model: String) async throws -> String {
         try await answer(
@@ -60,6 +171,10 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
     }
 
     public func availableModels() async throws -> [String] {
+        try await availableModelInfos().map(\.key)
+    }
+
+    public func availableModelInfos() async throws -> [LMStudioModelInfo] {
         var request = URLRequest(url: serverURL.appending(path: "api/v1/models"))
         request.timeoutInterval = 8
         do {
@@ -68,8 +183,7 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
             let decoded = try JSONDecoder().decode(ModelsResponse.self, from: data)
             return decoded.models
                 .filter { $0.type == "llm" }
-                .map(\.key)
-                .sorted()
+                .sorted { $0.key < $1.key }
         } catch let error as ScreenshotAnswerError {
             throw error
         } catch is DecodingError {
@@ -275,12 +389,7 @@ struct LMStudioRequestEncoder {
 }
 
 private struct ModelsResponse: Decodable {
-    let models: [Model]
-
-    struct Model: Decodable {
-        let type: String
-        let key: String
-    }
+    let models: [LMStudioModelInfo]
 }
 
 private struct ChatCompletionRequest: Encodable {

@@ -14,12 +14,14 @@ Normal use does not require Terminal. After launching the app once, take a scree
 - Shows answers for 20 seconds in the lower-left corner across all Spaces.
 - Lets you copy or dismiss an answer directly from the overlay.
 - Provides model selection and screenshot-monitoring controls from the menu bar.
+- Asks for Japanese or English UI language only on first launch, then keeps the choice available from the unobtrusive settings button.
+- Lets region captures use the standard macOS screenshot destination, a custom folder, or temporary storage that is deleted after processing.
 - Uses a pomegranate-shaped template menu-bar icon that adapts to macOS appearances, plus a full-color app icon.
 - Captures a selected region from the menu-bar button or with `Control-Option-Command-4`.
 - Hides the settings panel and existing answer overlay before region selection so covered areas remain selectable.
-- Offers a content-explanation action when OCR does not contain an answerable question.
+- Automatically explains captured content with the closest available vision model when OCR does not contain an answerable question.
 - Uses collapsible sections for recognized text and answers.
-- Can describe photos, scenery, and other images containing no readable text by sending a resized image to a vision-capable local model.
+- Automatically describes photos, scenery, and other images containing no readable text by sending a resized image to a vision-capable local model.
 - Captures up to 90 seconds of system audio with ScreenCaptureKit on macOS 26 or later.
 - Transcribes English or Japanese audio on-device with SpeechTranscriber.
 - Keeps a stop control visible in the upper-right corner across all Spaces while recording; optional details show elapsed time, the question, and live transcription.
@@ -52,14 +54,14 @@ Expanding the advanced generation settings lets you select a separate, compatibl
 ## Using Phototropin
 
 1. Launch LM Studio, load an answer-capable model, and start the Local Server at the default `http://localhost:1234` address.
-2. Open `dist/Phototropin.app`.
-3. Open the pomegranate icon in the menu bar and select an LM Studio model once.
+2. Open `dist/Phototropin.app` and choose Japanese or English for the interface on first launch.
+3. Open the pomegranate icon in the menu bar and select an LM Studio model once. The interface language and region-capture storage can later be changed from the settings button at the bottom of the panel.
 4. Take a screenshot of a question with `Command-Shift-4` or another standard macOS capture command.
 5. After OCR and generation finish, the answer card appears in the lower-left corner.
 
 The card disappears automatically after 20 seconds. You can also copy the answer or close the card immediately.
 
-If OCR does not contain a question, use the “What is this? Explain the content” action. Phototropin then asks for the page type, important content, and any OCR uncertainty using a separate prompt. The same action is available for a photo or landscape with no recognized text; in that case, the app sends a resized copy of the image directly to a vision-capable local model. If the selected model cannot accept images, the app asks you to select a compatible model.
+If OCR does not contain a question, Phototropin automatically selects the vision-capable model whose declared parameter count is closest to the current model and asks it to explain the page type, important content, and any uncertainty. The same path handles a photo or landscape with no recognized text by sending a resized copy of the image directly to the local vision model. If no vision model is available, the app explains why answering was stopped. English questions receive English answers; other content receives Japanese answers, with uncertain context identified before the answer.
 
 ### Asking about currently playing audio
 
@@ -164,7 +166,7 @@ The CLI is intended for development diagnostics rather than normal use. `--text`
 ## Current limitations
 
 - Automatic monitoring only detects supported image extensions with recognized screenshot filename prefixes. Add OS-specific prefixes to `ScreenshotFileClassifier` when needed.
-- Normal question answering relies on OCR. Content explanation resizes the source image to a maximum of 1600 pixels, encodes it as JPEG, and supplies it as an OpenAI-compatible `image_url` data URL to the selected local LM Studio model. Accuracy for diagrams, equations, and small details depends on the model.
+- Normal question answering relies on OCR. Automatic content explanation resizes the source image to a maximum of 1600 pixels, encodes it as JPEG, and supplies it as an OpenAI-compatible `image_url` data URL to a local vision model. Accuracy for diagrams, equations, and small details depends on the model.
 - System audio is transcribed as the selected English or Japanese language. Rapid language switching and DRM-protected content may not be captured accurately.
 - A Draft Model must be vocabulary-compatible with the main model. Some combinations provide no speedup or are rejected by LM Studio. Configure MTP and DSpark in LM Studio.
 - Passing `swift test` or a CLI OCR check does not prove screenshot monitoring, permission prompts, overlays, audio capture, or the full GUI flow. Verify those paths by launching the signed `.app` before distributing a binary.

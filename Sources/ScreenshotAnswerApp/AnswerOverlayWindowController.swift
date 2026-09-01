@@ -12,6 +12,7 @@ final class AnswerOverlayWindowController {
     func show(
         answer: String,
         recognizedText: String,
+        language: InterfaceLanguage,
         dismissAfter: TimeInterval = 20,
         onExplain: (() -> Void)? = nil,
         onCopy: @escaping () -> Void
@@ -31,6 +32,7 @@ final class AnswerOverlayWindowController {
             rootView: AnswerOverlayCard(
                 answer: answer,
                 recognizedText: recognizedText,
+                language: language,
                 onExplain: onExplain,
                 onCopy: onCopy,
                 onClose: { [weak self] in self?.dismiss() }
@@ -62,10 +64,14 @@ final class AnswerOverlayWindowController {
         }
     }
 
-    func showFailure(_ message: String) {
+    func showFailure(_ message: String, language: InterfaceLanguage) {
         show(
             answer: message,
-            recognizedText: "回答を生成できませんでした",
+            recognizedText: language.text(
+                "回答を生成できませんでした",
+                "The answer could not be generated"
+            ),
+            language: language,
             dismissAfter: 20,
             onCopy: {}
         )
@@ -97,6 +103,7 @@ final class AnswerOverlayWindowController {
 private struct AnswerOverlayCard: View {
     let answer: String
     let recognizedText: String
+    let language: InterfaceLanguage
     let onExplain: (() -> Void)?
     let onCopy: () -> Void
     let onClose: () -> Void
@@ -113,12 +120,12 @@ private struct AnswerOverlayCard: View {
                     Image(systemName: "doc.on.doc")
                 }
                 .buttonStyle(.plain)
-                .help("回答をコピー")
+                .help(language.text("回答をコピー", "Copy answer"))
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.plain)
-                .help("閉じる")
+                .help(language.text("閉じる", "Close"))
             }
 
             Text(recognizedText.replacingOccurrences(of: "\n", with: " "))
@@ -136,7 +143,7 @@ private struct AnswerOverlayCard: View {
             }
 
             if let onExplain {
-                Button("これは何？ 内容を説明", systemImage: "questionmark.bubble") {
+                Button(language.text("これは何？ 内容を説明", "What Is This? Explain"), systemImage: "questionmark.bubble") {
                     onClose()
                     onExplain()
                 }

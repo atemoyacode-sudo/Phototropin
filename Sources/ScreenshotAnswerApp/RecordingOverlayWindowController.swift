@@ -13,6 +13,7 @@ final class RecordingOverlayWindowController {
     func show(
         elapsedText: String,
         language: String,
+        interfaceLanguage: InterfaceLanguage,
         question: String,
         transcript: String,
         organizesMultipleSpeakers: Bool,
@@ -34,6 +35,7 @@ final class RecordingOverlayWindowController {
         panel.contentView = NSHostingView(
             rootView: RecordingOverlayCard(
                 state: state,
+                language: interfaceLanguage,
                 onStop: onStop,
                 onExpansionChanged: { [weak self] expanded in
                     self?.resize(expanded: expanded)
@@ -122,6 +124,7 @@ private final class RecordingOverlayState: ObservableObject {
 
 private struct RecordingOverlayCard: View {
     @ObservedObject var state: RecordingOverlayState
+    let language: InterfaceLanguage
     let onStop: () -> Void
     let onExpansionChanged: (Bool) -> Void
     @State private var isExpanded = false
@@ -130,14 +133,14 @@ private struct RecordingOverlayCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Label("録音中", systemImage: "record.circle.fill")
+                Label(language.text("録音中", "Recording"), systemImage: "record.circle.fill")
                     .font(.headline)
                     .foregroundStyle(.red)
                 Text(state.elapsedText)
                     .font(.headline.monospacedDigit())
                     .foregroundStyle(.red)
                 Spacer(minLength: 8)
-                Button("停止して回答", systemImage: "stop.circle.fill", action: onStop)
+                Button(language.text("停止して回答", "Stop and Answer"), systemImage: "stop.circle.fill", action: onStop)
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
             }
@@ -151,7 +154,7 @@ private struct RecordingOverlayCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right")
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    Text("詳細")
+                    Text(language.text("詳細", "Details"))
                     Spacer()
                 }
                 .font(.caption.weight(.semibold))
@@ -165,15 +168,17 @@ private struct RecordingOverlayCard: View {
                 Divider()
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
-                        Text("言語: \(state.language)")
+                        Text(language.text("言語: \(state.language)", "Language: \(state.language)"))
                         Spacer()
-                        Text(state.organizesMultipleSpeakers ? "対話整理: オン（推定）" : "対話整理: オフ")
+                        Text(state.organizesMultipleSpeakers
+                            ? language.text("対話整理: オン（推定）", "Dialogue: On (Estimated)")
+                            : language.text("対話整理: オフ", "Dialogue: Off"))
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                     if !state.question.isEmpty {
-                        Text("質問: \(state.question)")
+                        Text(language.text("質問: \(state.question)", "Question: \(state.question)"))
                             .font(.caption)
                             .lineLimit(2)
                     }
@@ -181,7 +186,7 @@ private struct RecordingOverlayCard: View {
                     ScrollView {
                         Text(
                             state.transcript.isEmpty
-                                ? "文字起こしを待っています…"
+                                ? language.text("文字起こしを待っています…", "Waiting for transcription…")
                                 : state.transcript
                         )
                         .font(.caption)
