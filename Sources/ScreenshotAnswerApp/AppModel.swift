@@ -11,7 +11,7 @@ final class AppModel: ObservableObject {
     @Published var interfaceLanguage: InterfaceLanguage {
         didSet {
             guard hasChosenInterfaceLanguage else { return }
-            UserDefaults.standard.set(interfaceLanguage.rawValue, forKey: Keys.interfaceLanguage)
+            defaults.set(interfaceLanguage.rawValue, forKey: Keys.interfaceLanguage)
         }
     }
     @Published private(set) var hasChosenInterfaceLanguage: Bool
@@ -22,43 +22,44 @@ final class AppModel: ObservableObject {
     @Published var availableModels: [String] = []
     @Published private(set) var availableModelInfos: [LMStudioModelInfo] = []
     @Published var selectedModel: String {
-        didSet { UserDefaults.standard.set(selectedModel, forKey: Keys.selectedModel) }
+        didSet { defaults.set(selectedModel, forKey: Keys.selectedModel) }
     }
     @Published var speculativeDecodingMode: SpeculativeDecodingMode {
         didSet {
-            UserDefaults.standard.set(
+            defaults.set(
                 speculativeDecodingMode.rawValue,
                 forKey: Keys.speculativeDecodingMode
             )
         }
     }
     @Published var selectedDraftModel: String {
-        didSet { UserDefaults.standard.set(selectedDraftModel, forKey: Keys.selectedDraftModel) }
+        didSet { defaults.set(selectedDraftModel, forKey: Keys.selectedDraftModel) }
     }
     @Published var monitorsScreenshots: Bool {
         didSet {
-            UserDefaults.standard.set(monitorsScreenshots, forKey: Keys.monitorsScreenshots)
+            defaults.set(monitorsScreenshots, forKey: Keys.monitorsScreenshots)
             monitorsScreenshots ? startMonitor() : stopMonitor()
         }
     }
     @Published var copiesAnswer: Bool {
-        didSet { UserDefaults.standard.set(copiesAnswer, forKey: Keys.copiesAnswer) }
+        didSet { defaults.set(copiesAnswer, forKey: Keys.copiesAnswer) }
     }
     @Published var showsAnswerPopup: Bool {
-        didSet { UserDefaults.standard.set(showsAnswerPopup, forKey: Keys.showsAnswerPopup) }
+        didSet { defaults.set(showsAnswerPopup, forKey: Keys.showsAnswerPopup) }
     }
     @Published var captureStorageMode: CaptureStorageMode {
         didSet {
-            UserDefaults.standard.set(captureStorageMode.rawValue, forKey: Keys.captureStorageMode)
+            defaults.set(captureStorageMode.rawValue, forKey: Keys.captureStorageMode)
+            seedCustomCaptureDirectoryIfNeeded()
         }
     }
     @Published private(set) var customCaptureDirectoryPath: String?
     @Published var systemAudioLanguage: SystemAudioLanguage {
-        didSet { UserDefaults.standard.set(systemAudioLanguage.rawValue, forKey: Keys.systemAudioLanguage) }
+        didSet { defaults.set(systemAudioLanguage.rawValue, forKey: Keys.systemAudioLanguage) }
     }
     @Published var organizesMultipleSpeakers: Bool {
         didSet {
-            UserDefaults.standard.set(
+            defaults.set(
                 organizesMultipleSpeakers,
                 forKey: Keys.organizesMultipleSpeakers
             )
@@ -70,13 +71,17 @@ final class AppModel: ObservableObject {
     @Published private(set) var audioElapsedSeconds = 0
     @Published private(set) var isBusy = false
 
-    let screenshotDirectory = ScreenshotLocation.current()
+    @Published private(set) var screenshotDirectory: URL
+    private let screenshotDirectoryProvider: () -> URL
+    private let defaults: UserDefaults
 
     private let generator: LMStudioAnswerGenerator
     private let pipeline: ScreenshotAnswerPipeline
     private let overlayController = AnswerOverlayWindowController()
-    private let recordingOverlayController = RecordingOverlayWindowController()
-    private let systemAudioCapture = SystemAudioCaptureCoordinator()
+    private let recordingOverlayController: any RecordingOverlayPresenting
+    private let systemAudioCapture: any SystemAudioCapturing
+    private let temporaryCaptureStore: TemporaryCaptureStore
+    private let captureImage: @Sendable (URL) async -> Bool
     private var timer: Timer?
     private var systemAudioTimer: Timer?
     private var seenImages = Set<URL>()
@@ -86,8 +91,26 @@ final class AppModel: ObservableObject {
 
     var status: String { statusMessage.value(for: interfaceLanguage) }
 
-    init() {
-        let defaults = UserDefaults.standard
+    init(
+        defaults: UserDefaults = .standard,
+        generator: LMStudioAnswerGenerator? = nil,
+        recognizer: any ScreenshotTextRecognizing = VisionTextRecognizer(),
+        screenshotDirectory: URL? = nil,
+        screenshotDirectoryProvider: @escaping () -> URL = { ScreenshotLocation.current() },
+        temporaryCaptureStore: TemporaryCaptureStore = TemporaryCaptureStore(),
+        systemAudioCapture: (any SystemAudioCapturing)? = nil,
+        recordingOverlayController: (any RecordingOverlayPresenting)? = nil,
+        captureImage: (@Sendable (URL) async -> Bool)? = nil,
+        startsAutomatically: Bool = true
+    ) {
+        self.defaults = defaults
+        self.screenshotDirectory = screenshotDirectory ?? screenshotDirectoryProvider()
+        self.screenshotDirectoryProvider = screenshotDirectory.map { directory in { directory } }
+            ?? screenshotDirectoryProvider
+        self.temporaryCaptureStore = temporaryCaptureStore
+        self.systemAudioCapture = systemAudioCapture ?? SystemAudioCaptureCoordinator()
+        self.recordingOverlayController = recordingOverlayController ?? RecordingOverlayWindowController()
+        self.captureImage = captureImage ?? { await Self.captureSelection(to: $0) }
         Keys.migrateLegacyValues(in: defaults)
         interfaceLanguage = InterfaceLanguage(
             rawValue: defaults.string(forKey: Keys.interfaceLanguage) ?? ""
@@ -111,16 +134,18 @@ final class AppModel: ObservableObject {
         organizesMultipleSpeakers = defaults.object(
             forKey: Keys.organizesMultipleSpeakers
         ) as? Bool ?? true
-        generator = try! LMStudioAnswerGenerator()
-        pipeline = ScreenshotAnswerPipeline(generator: generator)
-        Task { @MainActor [weak self] in self?.start() }
+        let resolvedGenerator = generator ?? (try! LMStudioAnswerGenerator())
+        self.generator = resolvedGenerator
+        pipeline = ScreenshotAnswerPipeline(recognizer: recognizer, generator: resolvedGenerator)
+        try? temporaryCaptureStore.removeAbandonedCaptures()
+        if startsAutomatically { Task { @MainActor [weak self] in self?.start() } }
     }
 
     func chooseInterfaceLanguage(_ language: InterfaceLanguage) {
         interfaceLanguage = language
         hasChosenInterfaceLanguage = true
-        UserDefaults.standard.set(language.rawValue, forKey: Keys.interfaceLanguage)
-        UserDefaults.standard.set(true, forKey: Keys.hasChosenInterfaceLanguage)
+        defaults.set(language.rawValue, forKey: Keys.interfaceLanguage)
+        defaults.set(true, forKey: Keys.hasChosenInterfaceLanguage)
     }
 
     private func setStatus(_ japanese: String, _ english: String) {
@@ -166,6 +191,7 @@ final class AppModel: ObservableObject {
                 )
             } else {
                 setStatus("スクリーンショットを待っています", "Waiting for a screenshot")
+                processNextIfNeeded()
             }
         } catch {
             availableModels = []
@@ -178,18 +204,27 @@ final class AppModel: ObservableObject {
     }
 
     func captureSelection() {
-        guard !isBusy else { return }
+        guard !isBusy, !isListeningToSystemAudio else { return }
+        refreshScreenshotDirectory()
         guard let pendingImage = nextCapture() else { return }
+        isBusy = true
         let imageURL = pendingImage.url
         setStatus("範囲を選択してください…", "Select an area…")
         hideWindowsForCapture()
 
         Task {
+            defer {
+                isBusy = false
+                processNextIfNeeded()
+            }
             // MenuBarExtraのパネルが画面から完全に退避してから
             // 範囲選択を始め、パネルの下もドラッグできるようにする。
             try? await Task.sleep(nanoseconds: 180_000_000)
-            let captured = await Self.captureSelection(to: imageURL)
+            let captured = await captureImage(imageURL)
             guard captured else {
+                if pendingImage.deleteAfterProcessing {
+                    try? FileManager.default.removeItem(at: imageURL)
+                }
                 setStatus("撮影をキャンセルしました", "Capture canceled")
                 return
             }
@@ -211,7 +246,8 @@ final class AppModel: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         customCaptureDirectoryPath = url.path
         captureStorageMode = .customFolder
-        UserDefaults.standard.set(url.path, forKey: Keys.customCaptureDirectoryPath)
+        defaults.set(url.path, forKey: Keys.customCaptureDirectoryPath)
+        seedCustomCaptureDirectoryIfNeeded()
     }
 
     var customCaptureDirectoryDisplayName: String {
@@ -223,7 +259,7 @@ final class AppModel: ObservableObject {
 
     private func hideWindowsForCapture() {
         overlayController.dismissImmediately()
-        for window in NSApp.windows where window.isVisible {
+        for window in NSApp?.windows ?? [] where window.isVisible {
             window.orderOut(nil)
         }
     }
@@ -238,7 +274,7 @@ final class AppModel: ObservableObject {
     }
 
     func describeRecognizedContent() {
-        guard !isBusy,
+        guard !isBusy, !isListeningToSystemAudio,
               currentImageURL != nil
                 || !recognizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !selectedModel.isEmpty else { return }
@@ -312,6 +348,7 @@ final class AppModel: ObservableObject {
     }
 
     func openScreenshotDirectory() {
+        refreshScreenshotDirectory()
         if captureStorageMode == .customFolder,
            let customCaptureDirectoryPath {
             NSWorkspace.shared.open(URL(
@@ -376,6 +413,7 @@ final class AppModel: ObservableObject {
                     englishPrefix: "Could not capture audio",
                     error: error
                 )
+                processNextIfNeeded()
             }
         }
     }
@@ -412,7 +450,7 @@ final class AppModel: ObservableObject {
     }
 
     func answerAboutCapturedAudio() {
-        guard !isBusy,
+        guard !isBusy, !isListeningToSystemAudio,
               !audioTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !selectedModel.isEmpty else { return }
         isBusy = true
@@ -510,7 +548,24 @@ final class AppModel: ObservableObject {
         seenImages.formUnion(candidateImages())
     }
 
+    private func seedCustomCaptureDirectoryIfNeeded() {
+        guard didStart,
+              captureStorageMode == .customFolder,
+              let customCaptureDirectoryPath else { return }
+        let customDirectory = URL(
+            fileURLWithPath: customCaptureDirectoryPath,
+            isDirectory: true
+        )
+        seenImages.formUnion(ScreenshotMonitoringScope.candidateImages(in: [customDirectory]))
+    }
+
+    private func refreshScreenshotDirectory() {
+        let current = screenshotDirectoryProvider()
+        if current != screenshotDirectory { screenshotDirectory = current }
+    }
+
     private func scanForNewScreenshots() {
+        refreshScreenshotDirectory()
         let newImages = candidateImages()
             .filter { !seenImages.contains($0) }
             .filter { modificationDate(of: $0) >= startedAt.addingTimeInterval(-1) }
@@ -522,13 +577,17 @@ final class AppModel: ObservableObject {
     }
 
     private func candidateImages() -> [URL] {
-        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
-        let urls = (try? FileManager.default.contentsOfDirectory(
-            at: screenshotDirectory,
-            includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles]
-        )) ?? []
-        return urls.filter(ScreenshotFileClassifier.isLikelyScreenshot)
+        let customDirectory: URL? = if captureStorageMode == .customFolder,
+                                       let customCaptureDirectoryPath {
+            URL(fileURLWithPath: customCaptureDirectoryPath, isDirectory: true)
+        } else {
+            nil
+        }
+        let directories = ScreenshotMonitoringScope.directories(
+            standard: screenshotDirectory,
+            custom: customDirectory
+        )
+        return ScreenshotMonitoringScope.candidateImages(in: directories)
     }
 
     private func modificationDate(of url: URL) -> Date {
@@ -547,7 +606,7 @@ final class AppModel: ObservableObject {
     }
 
     private func processNextIfNeeded() {
-        guard !isBusy, !pendingImages.isEmpty else { return }
+        guard !isBusy, !isListeningToSystemAudio, !pendingImages.isEmpty else { return }
         guard !selectedModel.isEmpty else {
             let error = ScreenshotAnswerError.noLMStudioModel
             statusMessage = LocalizedInterfaceText(
@@ -588,15 +647,21 @@ final class AppModel: ObservableObject {
                 recognizedText = result.recognizedText
                 var resolvedAnswer = result.answer
                 if result.offersContentExplanation {
-                    if availableModelInfos.isEmpty,
-                       let modelInfos = try? await generator.availableModelInfos() {
-                        availableModelInfos = modelInfos
-                        availableModels = modelInfos.map(\.key)
+                    let refreshedSelection = try? await LMStudioVisionModelSelector
+                        .refreshingSelection(to: model) {
+                            try await generator.availableModelInfos()
+                        }
+                    if let refreshedSelection {
+                        availableModelInfos = refreshedSelection.models
+                        availableModels = refreshedSelection.models.map(\.key)
+                        normalizeDraftModelSelection()
                     }
-                    if let visionModel = LMStudioVisionModelSelector.closestVisionModel(
-                        to: model,
-                        among: availableModelInfos
-                    ) {
+                    let visionModel = refreshedSelection?.model
+                        ?? LMStudioVisionModelSelector.closestVisionModel(
+                            to: model,
+                            among: availableModelInfos
+                        )
+                    if let visionModel {
                         setStatus("画像の内容を自動説明中…", "Automatically explaining the image…")
                         resolvedAnswer = try await generator.describeImage(
                             imageURL: imageURL,
@@ -662,8 +727,7 @@ final class AppModel: ObservableObject {
             directory = URL(fileURLWithPath: customCaptureDirectoryPath, isDirectory: true)
             deleteAfterProcessing = false
         case .temporary:
-            directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("Phototropin-Captures", isDirectory: true)
+            directory = temporaryCaptureStore.directoryURL
             deleteAfterProcessing = true
         }
 
@@ -701,7 +765,7 @@ final class AppModel: ObservableObject {
             try? FileManager.default.removeItem(at: pendingImage.url)
             seenImages.remove(pendingImage.url)
         }
-        pendingImages.removeAll()
+        pendingImages.removeAll(where: \.deleteAfterProcessing)
     }
 
     var availableDraftModels: [String] {

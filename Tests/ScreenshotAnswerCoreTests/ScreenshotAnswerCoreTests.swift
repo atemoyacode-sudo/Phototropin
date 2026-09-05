@@ -1,8 +1,89 @@
+import AppKit
 import Foundation
 import XCTest
 @testable import ScreenshotAnswerCore
 
 final class ScreenshotAnswerCoreTests: XCTestCase {
+    func testJPEGConversionPreservesOpaquePixelsAndCompositesAlphaOnWhite() throws {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 192, pixelsHigh: 64,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+            isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        let pixels = try XCTUnwrap(bitmap.bitmapData)
+        pixels.initialize(repeating: 0, count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+        for y in 0..<64 {
+            for x in 0..<192 {
+                pixels[y * bitmap.bytesPerRow + x * 4 + 3] = x < 64 ? 0 : (x < 128 ? 128 : 255)
+            }
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID()).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
+        let encoded = try LMStudioAnswerGenerator.imageBase64(from: url)
+        let jpeg = try XCTUnwrap(NSBitmapImageRep(data: XCTUnwrap(Data(base64Encoded: encoded))))
+        for (x, expected) in [(32, 1.0), (96, 0.5), (160, 0.0)] {
+            let color = try XCTUnwrap(jpeg.colorAt(x: x, y: 32)?.usingColorSpace(.deviceRGB))
+            XCTAssertEqual(color.redComponent, expected, accuracy: 0.08)
+            XCTAssertEqual(color.greenComponent, expected, accuracy: 0.08)
+            XCTAssertEqual(color.blueComponent, expected, accuracy: 0.08)
+        }
+    }
+
+    func testLoopbackRangeRejectsExternalAndMalformedHosts() {
+        for host in ["127.0.0.2", "127.255.255.255", "127.1.2.3"] {
+            XCTAssertTrue(LMStudioAnswerGenerator.isLoopback(URL(string: "http://\(host):1234")!))
+        }
+        for host in ["128.0.0.1", "10.0.0.1", "127.0.0.256", "127.0.0.1.example.com", "127.+0.0.1"] {
+            if let url = URL(string: "http://\(host):1234") {
+                XCTAssertFalse(LMStudioAnswerGenerator.isLoopback(url), host)
+            }
+        }
+    }
+
+    func testTransportFailuresRetainActionableDetailsOnBothEndpoints() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [LMStudioMockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer {
+            LMStudioMockURLProtocol.handler = nil
+            session.invalidateAndCancel()
+        }
+        let generator = try LMStudioAnswerGenerator(session: session)
+        let failures: [(URLError.Code, String)] = [
+            (.timedOut, "タイムアウト"), (.cannotConnectToHost, "接続できません"),
+            (.cannotFindHost, "ホストを解決"), (.networkConnectionLost, "切断"),
+            (.cancelled, "キャンセル"), (.badServerResponse, "-1011"),
+        ]
+        for (code, expected) in failures {
+            LMStudioMockURLProtocol.handler = { _ in throw URLError(code) }
+            for modelsEndpoint in [true, false] {
+                do {
+                    if modelsEndpoint { _ = try await generator.availableModels() }
+                    else { _ = try await generator.answer(recognizedText: "test", model: "test") }
+                    XCTFail("Expected a transport error")
+                } catch {
+                    XCTAssertTrue(error.localizedDescription.contains(expected), error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    func testOCRReadingOrderDoesNotDependOnObservationOrder() {
+        let top = OCRLine(text: "top", box: CGRect(x: 0.7, y: 0.70, width: 0.2, height: 0.10))
+        let middle = OCRLine(text: "middle", box: CGRect(x: 0.4, y: 0.66, width: 0.2, height: 0.10))
+        let bottom = OCRLine(text: "bottom", box: CGRect(x: 0.1, y: 0.62, width: 0.2, height: 0.10))
+        let permutations = [
+            [top, middle, bottom], [top, bottom, middle],
+            [middle, top, bottom], [middle, bottom, top],
+            [bottom, top, middle], [bottom, middle, top],
+        ]
+        let expected = ["middle", "top", "bottom"]
+        for input in permutations {
+            XCTAssertEqual(OCRReadingOrder.lines(from: input), expected)
+        }
+    }
+
     func testAudioTranscriptAccumulatorPreservesTurnsAndReplacesInterimText() {
         var accumulator = AudioTranscriptAccumulator()
 
@@ -60,6 +141,100 @@ final class ScreenshotAnswerCoreTests: XCTestCase {
         XCTAssertTrue(AnswerResponseClassifier.offersContentExplanation(
             "No answerable question was found in the OCR text."
         ))
+    }
+
+    func testNoQuestionPhraseInsideARealAnswerDoesNotOfferExplanation() {
+        XCTAssertFalse(AnswerResponseClassifier.offersContentExplanation(
+            "There is no question that the correct answer is option 2."
+        ))
+        XCTAssertFalse(AnswerResponseClassifier.offersContentExplanation(
+            "The phrase ‘no question’ is an idiom in this sentence."
+        ))
+    }
+
+    func testCustomFolderDetectsAnExternallyAddedScreenshot() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let standard = root.appendingPathComponent("standard", isDirectory: true)
+        let custom = root.appendingPathComponent("custom", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: standard, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: custom, withIntermediateDirectories: true)
+
+        let directories = ScreenshotMonitoringScope.directories(
+            standard: standard,
+            custom: custom
+        )
+        XCTAssertTrue(ScreenshotMonitoringScope.candidateImages(in: directories).isEmpty)
+
+        let externalScreenshot = custom.appendingPathComponent("Screenshot 2026-09-02.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: externalScreenshot)
+
+        let detectedPaths = ScreenshotMonitoringScope.candidateImages(in: directories)
+            .map { $0.standardizedFileURL.resolvingSymlinksInPath().path }
+        XCTAssertEqual(
+            detectedPaths,
+            [externalScreenshot.standardizedFileURL.resolvingSymlinksInPath().path]
+        )
+    }
+
+    func testVisionSelectionRefreshesAPreviouslyTextOnlyCatalog() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [LMStudioMockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let generator = try LMStudioAnswerGenerator(
+            serverURL: URL(string: "http://127.0.0.1:1234")!,
+            session: session
+        )
+        var includesVisionModel = false
+        LMStudioMockURLProtocol.handler = { request in
+            let modelsJSON = includesVisionModel
+                ? #"{"models":[{"type":"llm","key":"text-8b","params_string":"8B","capabilities":{"vision":false}},{"type":"llm","key":"vision-9b","params_string":"9B","capabilities":{"vision":true}}]}"#
+                : #"{"models":[{"type":"llm","key":"text-8b","params_string":"8B","capabilities":{"vision":false}}]}"#
+            return Self.mockResponse(request: request, json: modelsJSON)
+        }
+        defer {
+            LMStudioMockURLProtocol.handler = nil
+            session.invalidateAndCancel()
+        }
+
+        let initialModels = try await generator.availableModelInfos()
+        XCTAssertNil(LMStudioVisionModelSelector.closestVisionModel(
+            to: "text-8b",
+            among: initialModels
+        ))
+
+        includesVisionModel = true
+        let refreshed = try await LMStudioVisionModelSelector.refreshingSelection(
+            to: "text-8b"
+        ) {
+            try await generator.availableModelInfos()
+        }
+
+        XCTAssertEqual(refreshed.models.map(\.key), ["text-8b", "vision-9b"])
+        XCTAssertEqual(refreshed.model?.key, "vision-9b")
+    }
+
+    func testTemporaryCaptureStoreRemovesCrashLeftovers() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let store = TemporaryCaptureStore(baseDirectory: root)
+        try FileManager.default.createDirectory(
+            at: store.directoryURL,
+            withIntermediateDirectories: true
+        )
+        let abandonedCapture = store.directoryURL
+            .appendingPathComponent("Phototropin interrupted.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: abandonedCapture)
+
+        try store.removeAbandonedCaptures()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: abandonedCapture.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.directoryURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.path))
     }
 
     func testVisionSelectorChoosesClosestParameterCount() {

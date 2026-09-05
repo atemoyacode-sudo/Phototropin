@@ -56,7 +56,7 @@ private struct PhototropinPanel: View {
                         model.captureSelection()
                     }
                     .keyboardShortcut("4", modifiers: [.control, .option, .command])
-                    .disabled(model.isBusy)
+                    .disabled(model.isBusy || model.isListeningToSystemAudio)
 
                     Button(language.text("再確認", "Check Now"), systemImage: "arrow.clockwise") {
                         model.scanNow()
@@ -335,7 +335,10 @@ private struct LanguageSettingsView: View {
                 .padding(6)
             }
 
-            GroupBox(language.text("範囲撮影の保存", "Area Capture Storage")) {
+            GroupBox(language.text(
+                "スクリーンショット監視・範囲撮影の保存",
+                "Screenshot Monitoring and Area Capture Storage"
+            )) {
                 VStack(alignment: .leading, spacing: 10) {
                     Picker("", selection: $model.captureStorageMode) {
                         ForEach(CaptureStorageMode.allCases) { mode in
@@ -360,8 +363,8 @@ private struct LanguageSettingsView: View {
                     }
 
                     Text(language.text(
-                        "「保存しない」では一時ファイルで解析し、処理後すぐに削除します。標準の⌘⇧4の保存先はmacOS側の設定のままです。",
-                        "Do Not Save uses a temporary file and deletes it immediately after processing. The destination for standard ⌘⇧4 screenshots remains controlled by macOS."
+                        "指定フォルダはmacOS標準保存先と一緒に自動監視します。「保存しない」では一時ファイルを処理後に削除し、異常終了時の残留物も次回起動時に回収します。",
+                        "A custom folder is monitored alongside the standard macOS destination. Do Not Save deletes its temporary file after processing and removes crash leftovers on the next launch."
                     ))
                     .font(.caption2)
                     .foregroundStyle(.secondary)

@@ -4,7 +4,23 @@ import ScreenshotAnswerCore
 import SwiftUI
 
 @MainActor
-final class RecordingOverlayWindowController {
+protocol RecordingOverlayPresenting {
+    func show(
+        elapsedText: String, language: String, interfaceLanguage: InterfaceLanguage,
+        question: String, transcript: String, organizesMultipleSpeakers: Bool,
+        onStop: @escaping () -> Void
+    )
+    func update(elapsedText: String?, transcript: String?)
+    func dismiss()
+}
+
+extension RecordingOverlayPresenting {
+    func update(elapsedText: String) { update(elapsedText: elapsedText, transcript: nil) }
+    func update(transcript: String) { update(elapsedText: nil, transcript: transcript) }
+}
+
+@MainActor
+final class RecordingOverlayWindowController: RecordingOverlayPresenting {
     private let compactSize = CGSize(width: 360, height: 112)
     private let expandedSize = CGSize(width: 420, height: 288)
     private var panel: NSPanel?

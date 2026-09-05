@@ -27,6 +27,7 @@ public enum ScreenshotAnswerError: LocalizedError, Equatable {
     case noTextFound
     case lmStudioEndpointMustBeLocal
     case lmStudioUnavailable
+    case lmStudioNetworkError(Int)
     case noLMStudioModel
     case lmStudioRequestFailed(String)
     case imageModelRequired(String)
@@ -43,6 +44,18 @@ public enum ScreenshotAnswerError: LocalizedError, Equatable {
             return "LM Studioの接続先はlocalhostに限定されています。"
         case .lmStudioUnavailable:
             return "LM Studioに接続できません。Local Serverを起動してください（既定ポート1234）。"
+        case let .lmStudioNetworkError(code):
+            let detail: String
+            switch URLError.Code(rawValue: code) {
+            case .timedOut: detail = "要求がタイムアウトしました。"
+            case .cannotFindHost, .dnsLookupFailed: detail = "ホストを解決できません。"
+            case .cannotConnectToHost: detail = "Local Serverに接続できません。起動状態とポートを確認してください。"
+            case .notConnectedToInternet: detail = "ネットワーク接続を利用できません。"
+            case .networkConnectionLost: detail = "通信中に接続が切断されました。"
+            case .cancelled: detail = "要求がキャンセルされました。"
+            default: detail = "通信エラー（コード: \(code)）。"
+            }
+            return "LM Studioへの通信に失敗しました: \(detail)"
         case .noLMStudioModel:
             return "LM StudioのLocal Serverから利用できるモデルが返されませんでした。"
         case let .lmStudioRequestFailed(message):
@@ -171,15 +184,27 @@ public enum AnswerResponseClassifier {
     public static let noQuestionMarker = "[NO_QUESTION]"
 
     public static func offersContentExplanation(_ answer: String) -> Bool {
-        let normalized = answer.lowercased()
-        return normalized.contains(noQuestionMarker.lowercased())
-            || normalized.contains("質問が含まれていません")
-            || normalized.contains("問題が含まれていません")
-            || normalized.contains("回答すべき問題")
-            || normalized.contains("回答することができません")
-            || normalized.contains("no question")
-            || normalized.contains("no answerable question")
-            || normalized.contains("no problem to answer")
+        let normalized = answer
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if normalized.hasPrefix(noQuestionMarker.lowercased()) { return true }
+
+        let englishFallbacks = [
+            "no answerable question",
+            "no question was found",
+            "no problem to answer",
+            "the provided ocr text contains no question",
+        ]
+        if englishFallbacks.contains(where: normalized.hasPrefix) { return true }
+
+        let looksLikeJapaneseOCRRefusal = normalized.hasPrefix("提供されたocr")
+            || normalized.hasPrefix("提示されたocr")
+        return looksLikeJapaneseOCRRefusal
+            && (
+                normalized.contains("質問が含まれていません")
+                || normalized.contains("問題が含まれていません")
+                || normalized.contains("回答すべき問題")
+            )
     }
 
     public static func displayText(_ answer: String) -> String {

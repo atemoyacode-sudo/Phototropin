@@ -41,6 +41,18 @@ enum InterfaceLanguage: String, CaseIterable, Identifiable {
                 return "The LM Studio endpoint must be localhost."
             case .lmStudioUnavailable:
                 return "Could not connect to LM Studio. Start its Local Server on port 1234."
+            case let .lmStudioNetworkError(code):
+                let detail: String
+                switch URLError.Code(rawValue: code) {
+                case .timedOut: detail = "The request timed out."
+                case .cannotFindHost, .dnsLookupFailed: detail = "The host could not be resolved."
+                case .cannotConnectToHost: detail = "Could not connect to the Local Server. Check that it is running and verify the port."
+                case .notConnectedToInternet: detail = "The network connection is unavailable."
+                case .networkConnectionLost: detail = "The connection was lost during the request."
+                case .cancelled: detail = "The request was canceled."
+                default: detail = "Network error (code: \(code))."
+                }
+                return "LM Studio communication failed: \(detail)"
             case .noLMStudioModel:
                 return "The LM Studio Local Server did not return an available model."
             case let .lmStudioRequestFailed(message):
@@ -98,7 +110,7 @@ enum CaptureStorageMode: String, CaseIterable, Identifiable {
         case .screenshotFolder:
             language.text("macOSのスクリーンショット保存先", "macOS Screenshot Folder")
         case .customFolder:
-            language.text("指定したフォルダ", "Custom Folder")
+            language.text("指定したフォルダ（監視対象）", "Custom Folder (Also Monitored)")
         case .temporary:
             language.text("保存しない", "Do Not Save")
         }

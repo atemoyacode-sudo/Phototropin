@@ -54,14 +54,32 @@ struct OCRLine: Sendable, Equatable {
 
 enum OCRReadingOrder {
     static func lines(from observations: [OCRLine]) -> [String] {
-        observations
-            .sorted { left, right in
-                let verticalTolerance = max(left.box.height, right.box.height) * 0.45
-                if abs(left.box.midY - right.box.midY) <= verticalTolerance {
-                    return left.box.minX < right.box.minX
-                }
-                return left.box.midY > right.box.midY
+        // First establish a strict order, then group against a fixed row anchor.
+        // Pairwise vertical tolerances are non-transitive and cannot be used
+        // directly as a sorting comparator.
+        let ordered = observations.sorted {
+            if $0.box.midY != $1.box.midY { return $0.box.midY > $1.box.midY }
+            if $0.box.minX != $1.box.minX { return $0.box.minX < $1.box.minX }
+            if $0.box.height != $1.box.height { return $0.box.height < $1.box.height }
+            if $0.box.width != $1.box.width { return $0.box.width < $1.box.width }
+            return $0.text < $1.text
+        }
+        var rows: [[OCRLine]] = []
+        for observation in ordered {
+            if let anchor = rows.last?.first,
+               abs(anchor.box.midY - observation.box.midY)
+                <= max(anchor.box.height, observation.box.height) * 0.45 {
+                rows[rows.count - 1].append(observation)
+            } else {
+                rows.append([observation])
             }
-            .map(\.text)
+        }
+        return rows.flatMap { row in
+            row.sorted {
+                if $0.box.minX != $1.box.minX { return $0.box.minX < $1.box.minX }
+                if $0.box.midY != $1.box.midY { return $0.box.midY > $1.box.midY }
+                return $0.text < $1.text
+            }.map(\.text)
+        }
     }
 }

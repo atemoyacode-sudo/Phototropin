@@ -51,7 +51,14 @@ enum SystemAudioCaptureError: LocalizedError {
 }
 
 @MainActor
-final class SystemAudioCaptureCoordinator {
+protocol SystemAudioCapturing {
+    var isSupported: Bool { get }
+    func start(language: SystemAudioLanguage, onTranscript: @escaping @Sendable (String) -> Void) async throws
+    func stop() async throws -> String
+}
+
+@MainActor
+final class SystemAudioCaptureCoordinator: SystemAudioCapturing {
     private var modernSession: AnyObject?
 
     var isSupported: Bool {

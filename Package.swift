@@ -34,6 +34,10 @@ let package = Package(
             dependencies: ["ScreenshotAnswerCore"]
         ),
         .testTarget(
+            name: "ScreenshotAnswerAppTests",
+            dependencies: ["ScreenshotAnswerApp", "ScreenshotAnswerCore"]
+        ),
+        .testTarget(
             name: "ScreenshotAnswerCoreTests",
             dependencies: ["ScreenshotAnswerCore"]
         ),

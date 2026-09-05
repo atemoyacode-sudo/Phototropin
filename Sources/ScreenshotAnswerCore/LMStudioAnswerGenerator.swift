@@ -86,6 +86,27 @@ public struct LMStudioModelInfo: Sendable, Equatable, Decodable {
 }
 
 public enum LMStudioVisionModelSelector {
+    public struct RefreshedSelection: Sendable, Equatable {
+        public let models: [LMStudioModelInfo]
+        public let model: LMStudioModelInfo?
+
+        public init(models: [LMStudioModelInfo], model: LMStudioModelInfo?) {
+            self.models = models
+            self.model = model
+        }
+    }
+
+    public static func refreshingSelection(
+        to selectedModel: String,
+        fetchModels: () async throws -> [LMStudioModelInfo]
+    ) async rethrows -> RefreshedSelection {
+        let models = try await fetchModels()
+        return RefreshedSelection(
+            models: models,
+            model: closestVisionModel(to: selectedModel, among: models)
+        )
+    }
+
     public static func closestVisionModel(
         to selectedModel: String,
         among models: [LMStudioModelInfo]
@@ -188,6 +209,8 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
             throw error
         } catch is DecodingError {
             throw ScreenshotAnswerError.invalidLMStudioResponse
+        } catch let error as URLError {
+            throw ScreenshotAnswerError.lmStudioNetworkError(error.code.rawValue)
         } catch {
             throw ScreenshotAnswerError.lmStudioUnavailable
         }
@@ -292,6 +315,8 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
             throw error
         } catch is DecodingError {
             throw ScreenshotAnswerError.invalidLMStudioResponse
+        } catch let error as URLError {
+            throw ScreenshotAnswerError.lmStudioNetworkError(error.code.rawValue)
         } catch {
             throw ScreenshotAnswerError.lmStudioUnavailable
         }
@@ -300,10 +325,16 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
     public static func isLoopback(_ serverURL: URL) -> Bool {
         guard serverURL.scheme == "http",
               let host = serverURL.host?.lowercased() else { return false }
-        return host == "127.0.0.1" || host == "localhost" || host == "::1"
+        if host == "localhost" || host == "::1" || host == "[::1]" { return true }
+        let octets = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4, octets[0] == "127" else { return false }
+        return octets.allSatisfy { octet in
+            !octet.isEmpty && octet.utf8.allSatisfy { (48...57).contains($0) }
+                && UInt8(octet) != nil
+        }
     }
 
-    private static func imageBase64(from imageURL: URL) throws -> String {
+    static func imageBase64(from imageURL: URL) throws -> String {
         guard let image = NSImage(contentsOf: imageURL),
               let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             throw ScreenshotAnswerError.unreadableImage
@@ -334,6 +365,9 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
             throw ScreenshotAnswerError.unreadableImage
         }
         NSGraphicsContext.current = context
+        // Composite explicitly: JPEG cannot preserve alpha.
+        context.cgContext.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.cgContext.fill(CGRect(x: 0, y: 0, width: width, height: height))
         context.imageInterpolation = .high
         context.cgContext.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
         context.flushGraphics()

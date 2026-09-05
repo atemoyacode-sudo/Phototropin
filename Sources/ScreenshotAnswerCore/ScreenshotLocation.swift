@@ -34,6 +34,50 @@ public enum ScreenshotLocation {
     }
 }
 
+public enum ScreenshotMonitoringScope {
+    public static func directories(standard: URL, custom: URL?) -> [URL] {
+        var result: [URL] = []
+        var seenPaths = Set<String>()
+        for directory in [standard, custom].compactMap({ $0 }) {
+            let normalized = directory.standardizedFileURL.resolvingSymlinksInPath()
+            guard seenPaths.insert(normalized.path).inserted else { continue }
+            result.append(directory)
+        }
+        return result
+    }
+
+    public static func candidateImages(
+        in directories: [URL],
+        fileManager: FileManager = .default
+    ) -> [URL] {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
+        return directories.flatMap { directory in
+            let urls = (try? fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: keys,
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            return urls.filter(ScreenshotFileClassifier.isLikelyScreenshot)
+        }
+    }
+}
+
+public struct TemporaryCaptureStore {
+    public let directoryURL: URL
+
+    public init(
+        baseDirectory: URL = FileManager.default.temporaryDirectory,
+        directoryName: String = "Phototropin-Captures"
+    ) {
+        directoryURL = baseDirectory.appendingPathComponent(directoryName, isDirectory: true)
+    }
+
+    public func removeAbandonedCaptures(fileManager: FileManager = .default) throws {
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return }
+        try fileManager.removeItem(at: directoryURL)
+    }
+}
+
 public enum ScreenshotFileClassifier {
     public static let supportedExtensions = Set(["png", "jpg", "jpeg", "heic", "tif", "tiff"])
 

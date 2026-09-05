@@ -15,7 +15,8 @@ Normal use does not require Terminal. After launching the app once, take a scree
 - Lets you copy or dismiss an answer directly from the overlay.
 - Provides model selection and screenshot-monitoring controls from the menu bar.
 - Asks for Japanese or English UI language only on first launch, then keeps the choice available from the unobtrusive settings button.
-- Lets region captures use the standard macOS screenshot destination, a custom folder, or temporary storage that is deleted after processing.
+- Lets region captures use the standard macOS screenshot destination, a custom folder, or temporary storage that is deleted after processing and recovered after an interrupted run.
+- Monitors a selected custom folder alongside the standard macOS screenshot destination, including screenshots saved there by other apps.
 - Uses a pomegranate-shaped template menu-bar icon that adapts to macOS appearances, plus a full-color app icon.
 - Captures a selected region from the menu-bar button or with `Control-Option-Command-4`.
 - Hides the settings panel and existing answer overlay before region selection so covered areas remain selectable.
@@ -55,7 +56,7 @@ Expanding the advanced generation settings lets you select a separate, compatibl
 
 1. Launch LM Studio, load an answer-capable model, and start the Local Server at the default `http://localhost:1234` address.
 2. Open `dist/Phototropin.app` and choose Japanese or English for the interface on first launch.
-3. Open the pomegranate icon in the menu bar and select an LM Studio model once. The interface language and region-capture storage can later be changed from the settings button at the bottom of the panel.
+3. Open the pomegranate icon in the menu bar and select an LM Studio model once. The interface language, monitored custom folder, and region-capture storage can later be changed from the settings button at the bottom of the panel.
 4. Take a screenshot of a question with `Command-Shift-4` or another standard macOS capture command.
 5. After OCR and generation finish, the answer card appears in the lower-left corner.
 
