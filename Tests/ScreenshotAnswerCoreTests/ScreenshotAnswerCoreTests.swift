@@ -143,10 +143,14 @@ final class ScreenshotAnswerCoreTests: XCTestCase {
 
     func testLMStudioEndpointIsRestrictedToLoopbackHTTP() {
         XCTAssertTrue(LMStudioAnswerGenerator.isLoopback(URL(string: "http://127.0.0.1:1234")!))
+        XCTAssertTrue(LMStudioAnswerGenerator.isLoopback(URL(string: "http://127.0.0.2:1234")!))
+        XCTAssertTrue(LMStudioAnswerGenerator.isLoopback(URL(string: "http://127.255.255.255:1234")!))
         XCTAssertTrue(LMStudioAnswerGenerator.isLoopback(URL(string: "http://localhost:1234")!))
         XCTAssertTrue(LMStudioAnswerGenerator.isLoopback(URL(string: "http://[::1]:1234")!))
         XCTAssertFalse(LMStudioAnswerGenerator.isLoopback(URL(string: "https://localhost:1234")!))
         XCTAssertFalse(LMStudioAnswerGenerator.isLoopback(URL(string: "http://example.com:1234")!))
+        XCTAssertFalse(LMStudioAnswerGenerator.isLoopback(URL(string: "http://128.0.0.1:1234")!))
+        XCTAssertFalse(LMStudioAnswerGenerator.isLoopback(URL(string: "http://10.0.0.1:1234")!))
     }
 
     func testLMStudioTextRequestUsesOpenAIChatCompletionsShape() throws {

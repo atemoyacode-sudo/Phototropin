@@ -70,7 +70,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var audioElapsedSeconds = 0
     @Published private(set) var isBusy = false
 
-    let screenshotDirectory = ScreenshotLocation.current()
+    var screenshotDirectory: URL { ScreenshotLocation.current() }
 
     private let generator: LMStudioAnswerGenerator
     private let pipeline: ScreenshotAnswerPipeline
@@ -181,10 +181,15 @@ final class AppModel: ObservableObject {
         guard !isBusy else { return }
         guard let pendingImage = nextCapture() else { return }
         let imageURL = pendingImage.url
+        isBusy = true
         setStatus("範囲を選択してください…", "Select an area…")
         hideWindowsForCapture()
 
         Task {
+            defer {
+                isBusy = false
+                processNextIfNeeded()
+            }
             // MenuBarExtraのパネルが画面から完全に退避してから
             // 範囲選択を始め、パネルの下もドラッグできるようにする。
             try? await Task.sleep(nanoseconds: 180_000_000)

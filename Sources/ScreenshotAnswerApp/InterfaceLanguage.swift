@@ -41,6 +41,8 @@ enum InterfaceLanguage: String, CaseIterable, Identifiable {
                 return "The LM Studio endpoint must be localhost."
             case .lmStudioUnavailable:
                 return "Could not connect to LM Studio. Start its Local Server on port 1234."
+            case let .lmStudioNetworkError(detail):
+                return "LM Studio communication failed: \(detail)"
             case .noLMStudioModel:
                 return "The LM Studio Local Server did not return an available model."
             case let .lmStudioRequestFailed(message):
