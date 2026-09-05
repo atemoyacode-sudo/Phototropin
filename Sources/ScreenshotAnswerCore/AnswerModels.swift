@@ -27,6 +27,7 @@ public enum ScreenshotAnswerError: LocalizedError, Equatable {
     case noTextFound
     case lmStudioEndpointMustBeLocal
     case lmStudioUnavailable
+    case lmStudioNetworkError(String)
     case noLMStudioModel
     case lmStudioRequestFailed(String)
     case imageModelRequired(String)
@@ -43,6 +44,8 @@ public enum ScreenshotAnswerError: LocalizedError, Equatable {
             return "LM Studioの接続先はlocalhostに限定されています。"
         case .lmStudioUnavailable:
             return "LM Studioに接続できません。Local Serverを起動してください（既定ポート1234）。"
+        case let .lmStudioNetworkError(detail):
+            return "LM Studioへの通信に失敗しました: \(detail)"
         case .noLMStudioModel:
             return "LM StudioのLocal Serverから利用できるモデルが返されませんでした。"
         case let .lmStudioRequestFailed(message):

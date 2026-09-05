@@ -188,6 +188,10 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
             throw error
         } catch is DecodingError {
             throw ScreenshotAnswerError.invalidLMStudioResponse
+        } catch let urlError as URLError {
+            throw ScreenshotAnswerError.lmStudioNetworkError(
+                Self.describe(urlError)
+            )
         } catch {
             throw ScreenshotAnswerError.lmStudioUnavailable
         }
@@ -292,6 +296,10 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
             throw error
         } catch is DecodingError {
             throw ScreenshotAnswerError.invalidLMStudioResponse
+        } catch let urlError as URLError {
+            throw ScreenshotAnswerError.lmStudioNetworkError(
+                Self.describe(urlError)
+            )
         } catch {
             throw ScreenshotAnswerError.lmStudioUnavailable
         }
@@ -300,7 +308,28 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
     public static func isLoopback(_ serverURL: URL) -> Bool {
         guard serverURL.scheme == "http",
               let host = serverURL.host?.lowercased() else { return false }
-        return host == "127.0.0.1" || host == "localhost" || host == "::1"
+        if host == "localhost" || host == "::1" { return true }
+        // Accept the entire 127.0.0.0/8 loopback range (RFC 1122).
+        let octets = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4,
+              let first = UInt8(octets[0]),
+              first == 127 else { return false }
+        return octets.dropFirst().allSatisfy { UInt8($0) != nil }
+    }
+
+    private static func describe(_ urlError: URLError) -> String {
+        switch urlError.code {
+        case .timedOut:
+            return "要求がタイムアウトしました（接続先: \(urlError.failingURL?.absoluteString ?? "unknown")）"
+        case .cannotFindHost, .dnsLookupFailed:
+            return "ホストを解決できません（\(urlError.failingURL?.host ?? "unknown")）"
+        case .cannotConnectToHost, .notConnectedToInternet:
+            return "接続できません（\(urlError.failingURL?.absoluteString ?? "unknown")）"
+        case .cancelled:
+            return "要求がキャンセルされました"
+        default:
+            return "通信エラー code=\(urlError.code.rawValue)（\(urlError.failingURL?.absoluteString ?? "unknown")）"
+        }
     }
 
     private static func imageBase64(from imageURL: URL) throws -> String {
@@ -334,6 +363,9 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
             throw ScreenshotAnswerError.unreadableImage
         }
         NSGraphicsContext.current = context
+        // Fill with white first so transparent regions do not become black in JPEG.
+        context.cgContext.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.cgContext.fill(CGRect(x: 0, y: 0, width: width, height: height))
         context.imageInterpolation = .high
         context.cgContext.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
         context.flushGraphics()
