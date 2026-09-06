@@ -20,6 +20,7 @@ final class AppModelTests: XCTestCase {
         defaults.set(false, forKey: "Phototropin.showsAnswerPopup")
         defaults.set(false, forKey: "Phototropin.copiesAnswer")
         defaults.set("test-model", forKey: "Phototropin.selectedModel")
+        mockLMStudio.reset()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AppMockURLProtocol.self]
         session = URLSession(configuration: configuration)
@@ -138,6 +139,58 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.answer, "4", "Canceling selection must resume queued work")
     }
 
+    /// The automatic vision hand-off used to build fresh default options, which
+    /// silently answered an English interface in Japanese.
+    func testAutomaticImageExplanationKeepsTheInterfaceLanguage() async throws {
+        defaults.set("english", forKey: "Phototropin.interfaceLanguage")
+        mockLMStudio.script(
+            models: #"{"models":[{"type":"llm","key":"test-model"},{"type":"llm","key":"vision-model","capabilities":{"vision":true}}]}"#,
+            chatContents: ["[NO_QUESTION]", "Fried chicken, 680 yen"]
+        )
+
+        let model = try makeModel(recognizer: MenuRecognizer())
+        let screenshot = root.appendingPathComponent("Screenshot menu.png")
+        try makePNGData().write(to: screenshot)
+        model.scanNow()
+        try await waitUntil { model.answer == "Fried chicken, 680 yen" }
+
+        let bodies = mockLMStudio.chatBodies
+        XCTAssertEqual(bodies.count, 2, "The vision hand-off should be the second request")
+        let visionRequest = try XCTUnwrap(bodies.last)
+        XCTAssertTrue(visionRequest.contains("vision-model"))
+        XCTAssertTrue(visionRequest.contains("Always reply in English"))
+        XCTAssertTrue(visionRequest.contains("translate the relevant text into English"))
+        XCTAssertFalse(visionRequest.contains("Always reply in Japanese"))
+    }
+
+    /// Translation must not depend on the model emitting `[NO_QUESTION]`, and
+    /// must not spend a round trip asking whether a question is present.
+    func testTranslationModeTranslatesInOneRequestWithoutTheImage() async throws {
+        defaults.set("english", forKey: "Phototropin.interfaceLanguage")
+        defaults.set(true, forKey: "Phototropin.prefersTranslation")
+        mockLMStudio.script(
+            models: #"{"models":[{"type":"llm","key":"test-model"},{"type":"llm","key":"vision-model","capabilities":{"vision":true}}]}"#,
+            // A model that ignores the marker and summarizes instead must not
+            // be able to derail translation.
+            chatContents: ["Fried chicken, 680 yen", "There is no specific question asked."]
+        )
+
+        let model = try makeModel(recognizer: MenuRecognizer())
+        try makePNGData().write(to: root.appendingPathComponent("Screenshot menu.png"))
+        model.scanNow()
+        try await waitUntil { model.answer == "Fried chicken, 680 yen" }
+
+        let bodies = mockLMStudio.chatBodies
+        XCTAssertEqual(bodies.count, 1, "Translation should take exactly one request")
+        let request = try XCTUnwrap(bodies.first)
+        XCTAssertTrue(request.contains("test-model"), "The already selected model should answer")
+        XCTAssertFalse(request.contains("vision-model"), "No vision hand-off should happen")
+        XCTAssertFalse(request.contains("image_url"), "The image should not be sent")
+        XCTAssertFalse(request.contains("NO_QUESTION"), "The question pass should be skipped")
+        XCTAssertTrue(request.contains("Translate the supplied content into English"))
+        XCTAssertTrue(request.contains("Output the translation and nothing else"))
+    }
+
     func testScreenshotWaitsForModelRefreshInsteadOfBeingLost() async throws {
         let model = try makeModel()
         model.selectedModel = ""
@@ -207,6 +260,23 @@ final class AppModelTests: XCTestCase {
 
 }
 
+private struct MenuRecognizer: ScreenshotTextRecognizing {
+    func recognizeText(in imageURL: URL) async throws -> String {
+        "本日のおすすめ\n鶏の唐揚げ 680円"
+    }
+}
+
+private func makePNGData() throws -> Data {
+    let bitmap = try XCTUnwrap(NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 8,
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+        isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+    ))
+    let pixels = try XCTUnwrap(bitmap.bitmapData)
+    pixels.initialize(repeating: 255, count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+    return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+}
+
 private struct QuestionRecognizer: ScreenshotTextRecognizing {
     func recognizeText(in imageURL: URL) async throws -> String { "What is 2 + 2?" }
 }
@@ -246,17 +316,77 @@ private actor CaptureGate {
     }
 }
 
+/// Scripted LM Studio replies plus the request bodies that produced them, so a
+/// test can assert what the app actually sent.
+private final class MockLMStudio: @unchecked Sendable {
+    private let lock = NSLock()
+    private var queuedChatContents: [String] = []
+    private var sentChatBodies: [String] = []
+    private var modelsJSON = #"{"models":[{"type":"llm","key":"test-model"}]}"#
+
+    func reset() {
+        lock.withLock {
+            queuedChatContents = []
+            sentChatBodies = []
+            modelsJSON = #"{"models":[{"type":"llm","key":"test-model"}]}"#
+        }
+    }
+
+    func script(models: String? = nil, chatContents: [String] = []) {
+        lock.withLock {
+            if let models { modelsJSON = models }
+            queuedChatContents = chatContents
+        }
+    }
+
+    var chatBodies: [String] { lock.withLock { sentChatBodies } }
+
+    fileprivate func models() -> String { lock.withLock { modelsJSON } }
+
+    fileprivate func nextChatContent(for body: String) -> String {
+        lock.withLock {
+            sentChatBodies.append(body)
+            return queuedChatContents.isEmpty ? "4" : queuedChatContents.removeFirst()
+        }
+    }
+}
+
+private let mockLMStudio = MockLMStudio()
+
 private final class AppMockURLProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        let json = request.url?.path == "/api/v1/models"
-            ? #"{"models":[{"type":"llm","key":"test-model"}]}"#
-            : #"{"choices":[{"message":{"content":"4"}}]}"#
+        let json: String
+        if request.url?.path == "/api/v1/models" {
+            json = mockLMStudio.models()
+        } else {
+            let content = mockLMStudio.nextChatContent(for: Self.body(of: request))
+            let escaped = content
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            json = #"{"choices":[{"message":{"content":"\#(escaped)"}}]}"#
+        }
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(json.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+
+    /// URLSession replaces `httpBody` with a stream before a protocol sees it.
+    private static func body(of request: URLRequest) -> String {
+        if let data = request.httpBody { return String(decoding: data, as: UTF8.self) }
+        guard let stream = request.httpBodyStream else { return "" }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            guard read > 0 else { break }
+            data.append(buffer, count: read)
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
 }

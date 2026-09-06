@@ -47,6 +47,9 @@ final class AppModel: ObservableObject {
     @Published var showsAnswerPopup: Bool {
         didSet { defaults.set(showsAnswerPopup, forKey: Keys.showsAnswerPopup) }
     }
+    @Published var prefersTranslation: Bool {
+        didSet { defaults.set(prefersTranslation, forKey: Keys.prefersTranslation) }
+    }
     @Published var captureStorageMode: CaptureStorageMode {
         didSet {
             defaults.set(captureStorageMode.rawValue, forKey: Keys.captureStorageMode)
@@ -124,6 +127,7 @@ final class AppModel: ObservableObject {
         monitorsScreenshots = defaults.object(forKey: Keys.monitorsScreenshots) as? Bool ?? true
         copiesAnswer = defaults.object(forKey: Keys.copiesAnswer) as? Bool ?? false
         showsAnswerPopup = defaults.object(forKey: Keys.showsAnswerPopup) as? Bool ?? true
+        prefersTranslation = defaults.object(forKey: Keys.prefersTranslation) as? Bool ?? false
         captureStorageMode = CaptureStorageMode(
             rawValue: defaults.string(forKey: Keys.captureStorageMode) ?? ""
         ) ?? .screenshotFolder
@@ -290,7 +294,10 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 let generated: String
-                if let imageURL {
+                let hasRecognizedText = !text
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+                if let imageURL, !(options.prefersTranslation && hasRecognizedText) {
                     do {
                         generated = try await generator.describeImage(
                             imageURL: imageURL,
@@ -326,6 +333,9 @@ final class AppModel: ObservableObject {
                             )
                             : text,
                         language: interfaceLanguage,
+                        onAsk: text.isEmpty
+                            ? nil
+                            : { [weak self] question in self?.askFollowUp(question) },
                         onCopy: { [weak self] in self?.copyAnswer() }
                     )
                 }
@@ -473,6 +483,98 @@ final class AppModel: ObservableObject {
             isBusy = false
             processNextIfNeeded()
         }
+    }
+
+    /// Translates straight from OCR, skipping the question-answering pass.
+    ///
+    /// That pass costs a round trip and only routes correctly when the model
+    /// returns the `[NO_QUESTION]` marker, which it does not do reliably. When
+    /// the user has asked for translation, there is nothing to decide.
+    /// Returns `nil` when OCR found no text, leaving the image path to run.
+    private func translatedResult(
+        for imageURL: URL,
+        model: String,
+        options: LMStudioGenerationOptions
+    ) async throws -> ScreenshotAnswerResult? {
+        let text: String
+        do {
+            text = try await pipeline.recognizeText(in: imageURL)
+        } catch ScreenshotAnswerError.noTextFound {
+            return nil
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+        setStatus("内容を翻訳中…", "Translating the content…")
+        let translated = try await generator.describe(
+            recognizedText: text,
+            model: model,
+            options: options
+        )
+        setStatus("内容を翻訳しました", "Content translated")
+        return ScreenshotAnswerResult(
+            imageURL: imageURL,
+            recognizedText: text,
+            answer: AnswerResponseClassifier.displayText(translated),
+            model: model
+        )
+    }
+
+    /// Answers a further question about the screenshot that is already on screen.
+    /// The captured OCR text stays the evidence, so nothing is re-captured.
+    func askFollowUp(_ question: String) {
+        let trimmedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let context = recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuestion.isEmpty, !context.isEmpty else { return }
+        guard !isBusy, !isListeningToSystemAudio else { return }
+        guard !selectedModel.isEmpty else {
+            setStatus("モデルが未選択です", "No model selected")
+            return
+        }
+
+        isBusy = true
+        setStatus("質問に回答中…", "Answering your question…")
+        let previousAnswer = answer
+        let options = generationOptions
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isBusy = false }
+            do {
+                let generated = try await self.generator.answerFollowUp(
+                    question: trimmedQuestion,
+                    recognizedText: context,
+                    previousAnswer: previousAnswer,
+                    model: self.selectedModel,
+                    options: options
+                )
+                self.answer = AnswerResponseClassifier.displayText(generated)
+                self.canDescribeRecognizedContent = false
+                self.setStatus("質問に回答しました", "Answered your question")
+                if self.copiesAnswer { self.copyAnswer() }
+                if self.showsAnswerPopup { self.showAnswerOverlay(recognizedText: context) }
+            } catch {
+                self.setStatus(
+                    "回答に失敗しました",
+                    self.interfaceLanguage.errorDescription(for: error)
+                )
+                if self.showsAnswerPopup {
+                    self.overlayController.showFailure(
+                        self.interfaceLanguage.errorDescription(for: error),
+                        language: self.interfaceLanguage
+                    )
+                }
+            }
+        }
+    }
+
+    private func showAnswerOverlay(recognizedText context: String) {
+        overlayController.show(
+            answer: answer,
+            recognizedText: context,
+            language: interfaceLanguage,
+            onAsk: { [weak self] question in self?.askFollowUp(question) },
+            onCopy: { [weak self] in self?.copyAnswer() }
+        )
     }
 
     private func generateAudioAnswer() async throws {
@@ -639,11 +741,19 @@ final class AppModel: ObservableObject {
                 processNextIfNeeded()
             }
             do {
-                let result = try await pipeline.process(
-                    imageURL: imageURL,
-                    model: model,
-                    options: options
-                )
+                let translated = options.prefersTranslation
+                    ? try await translatedResult(for: imageURL, model: model, options: options)
+                    : nil
+                let result: ScreenshotAnswerResult
+                if let translated {
+                    result = translated
+                } else {
+                    result = try await pipeline.process(
+                        imageURL: imageURL,
+                        model: model,
+                        options: options
+                    )
+                }
                 recognizedText = result.recognizedText
                 var resolvedAnswer = result.answer
                 if result.offersContentExplanation {
@@ -663,11 +773,16 @@ final class AppModel: ObservableObject {
                         )
                     if let visionModel {
                         setStatus("画像の内容を自動説明中…", "Automatically explaining the image…")
+                        // The interface language and translation preference must
+                        // survive the hand-off, but the draft model was chosen
+                        // for the main model and need not match this one.
+                        var visionOptions = options
+                        visionOptions.draftModel = nil
                         resolvedAnswer = try await generator.describeImage(
                             imageURL: imageURL,
                             recognizedText: result.recognizedText,
                             model: visionModel.key,
-                            options: LMStudioGenerationOptions()
+                            options: visionOptions
                         )
                         setStatus("画像の内容を説明しました", "Image explained")
                     } else {
@@ -693,6 +808,9 @@ final class AppModel: ObservableObject {
                             )
                             : result.recognizedText,
                         language: interfaceLanguage,
+                        onAsk: result.recognizedText.isEmpty
+                            ? nil
+                            : { [weak self] question in self?.askFollowUp(question) },
                         onCopy: { [weak self] in self?.copyAnswer() }
                     )
                 }
@@ -773,10 +891,11 @@ final class AppModel: ObservableObject {
     }
 
     var generationOptions: LMStudioGenerationOptions {
-        guard speculativeDecodingMode == .draftModel else {
-            return LMStudioGenerationOptions()
-        }
-        return LMStudioGenerationOptions(draftModel: selectedDraftModel)
+        LMStudioGenerationOptions(
+            draftModel: speculativeDecodingMode == .draftModel ? selectedDraftModel : nil,
+            answerLanguage: interfaceLanguage.answerLanguage,
+            prefersTranslation: prefersTranslation
+        )
     }
 
     private func normalizeDraftModelSelection() {
@@ -819,6 +938,7 @@ private enum Keys {
     static let monitorsScreenshots = "Phototropin.monitorsScreenshots"
     static let copiesAnswer = "Phototropin.copiesAnswer"
     static let showsAnswerPopup = "Phototropin.showsAnswerPopup"
+    static let prefersTranslation = "Phototropin.prefersTranslation"
     static let captureStorageMode = "Phototropin.captureStorageMode"
     static let customCaptureDirectoryPath = "Phototropin.customCaptureDirectoryPath"
     static let systemAudioLanguage = "Phototropin.systemAudioLanguage"

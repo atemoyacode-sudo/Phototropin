@@ -21,6 +21,16 @@ enum InterfaceLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Generated answers follow the interface language, not the language of the
+    /// captured content, so a reader who cannot read the source still can read
+    /// the answer.
+    var answerLanguage: AnswerLanguage {
+        switch self {
+        case .japanese: .japanese
+        case .english: .english
+        }
+    }
+
     func text(_ japanese: String, _ english: String) -> String {
         switch self {
         case .japanese: japanese

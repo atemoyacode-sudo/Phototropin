@@ -128,6 +128,11 @@ private struct PhototropinPanel: View {
                 Toggle(language.text("標準スクリーンショットを自動検出", "Automatically Detect Screenshots"), isOn: $model.monitorsScreenshots)
                 Toggle(language.text("回答を画面左下に表示", "Show Answers at Bottom Left"), isOn: $model.showsAnswerPopup)
                 Toggle(language.text("生成した回答を自動コピー", "Automatically Copy Answers"), isOn: $model.copiesAnswer)
+                Toggle(language.text("説明より翻訳を優先", "Prefer Translation Over Explanation"), isOn: $model.prefersTranslation)
+                    .help(language.text(
+                        "問題が含まれない画面を、要約せずそのまま訳します。",
+                        "Translates a screen that contains no question instead of summarizing it."
+                    ))
 
                 GroupBox(language.text("今流れている音声", "Currently Playing Audio")) {
                     VStack(alignment: .leading, spacing: 9) {
@@ -230,7 +235,7 @@ private struct PhototropinPanel: View {
                     ) {
                         GroupBox {
                             ScrollView {
-                                Text(model.answer)
+                                Text(AnswerTextFormatter.attributed(model.answer))
                                     .font(.body.weight(.medium))
                                     .textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)

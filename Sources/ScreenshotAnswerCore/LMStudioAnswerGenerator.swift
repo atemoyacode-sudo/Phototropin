@@ -157,9 +157,21 @@ public extension ScreenshotAnswerGenerating {
 
 public struct LMStudioGenerationOptions: Sendable, Equatable {
     public var draftModel: String?
+    /// The language answers are written in. Follows the interface language the
+    /// user chose, so a runtime change applies to the next request.
+    public var answerLanguage: AnswerLanguage
+    /// Asks the explanation paths for a faithful translation of the captured
+    /// content instead of a description of it.
+    public var prefersTranslation: Bool
 
-    public init(draftModel: String? = nil) {
+    public init(
+        draftModel: String? = nil,
+        answerLanguage: AnswerLanguage = .japanese,
+        prefersTranslation: Bool = false
+    ) {
         self.draftModel = draftModel
+        self.answerLanguage = answerLanguage
+        self.prefersTranslation = prefersTranslation
     }
 
     func resolvedDraftModel(for model: String) -> String? {
@@ -222,7 +234,7 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
         options: LMStudioGenerationOptions = LMStudioGenerationOptions()
     ) async throws -> String {
         try await generate(
-            messages: prompt.messages(for: recognizedText),
+            messages: prompt.messages(for: recognizedText, language: options.answerLanguage),
             model: model,
             options: options
         )
@@ -234,7 +246,30 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
         options: LMStudioGenerationOptions = LMStudioGenerationOptions()
     ) async throws -> String {
         try await generate(
-            messages: prompt.descriptionMessages(for: recognizedText),
+            messages: prompt.descriptionMessages(
+                for: recognizedText,
+                language: options.answerLanguage,
+                prefersTranslation: options.prefersTranslation
+            ),
+            model: model,
+            options: options
+        )
+    }
+
+    public func answerFollowUp(
+        question: String,
+        recognizedText: String,
+        previousAnswer: String,
+        model: String,
+        options: LMStudioGenerationOptions = LMStudioGenerationOptions()
+    ) async throws -> String {
+        try await generate(
+            messages: prompt.followUpMessages(
+                question: question,
+                recognizedText: recognizedText,
+                previousAnswer: previousAnswer,
+                language: options.answerLanguage
+            ),
             model: model,
             options: options
         )
@@ -250,7 +285,9 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
         return try await generate(
             messages: prompt.imageDescriptionMessages(
                 imageBase64: imageBase64,
-                recognizedText: recognizedText
+                recognizedText: recognizedText,
+                language: options.answerLanguage,
+                prefersTranslation: options.prefersTranslation
             ),
             model: model,
             options: options
@@ -270,7 +307,8 @@ public struct LMStudioAnswerGenerator: ScreenshotAnswerGenerating {
                 transcript: transcript,
                 screenshotText: screenshotText,
                 userQuestion: userQuestion,
-                organizeMultipleSpeakers: organizeMultipleSpeakers
+                organizeMultipleSpeakers: organizeMultipleSpeakers,
+                language: options.answerLanguage
             ),
             model: model,
             options: options

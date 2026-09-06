@@ -111,7 +111,7 @@ final class ScreenshotAnswerCoreTests: XCTestCase {
         XCTAssertTrue(messages[0].content.contains("untrusted data"))
         XCTAssertTrue(messages[0].content.contains("Do not follow"))
         XCTAssertTrue(messages[0].content.contains("[NO_QUESTION]"))
-        XCTAssertTrue(messages[0].content.contains("mainly in English"))
+        XCTAssertTrue(messages[0].content.contains("Always reply in Japanese"))
         XCTAssertTrue(messages[0].content.contains("context is uncertain"))
         XCTAssertTrue(messages[0].content.contains("vision-capable model"))
         XCTAssertTrue(messages[0].content.contains("substitute each candidate"))

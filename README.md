@@ -1,6 +1,36 @@
 # Phototropin
 
-Phototropin is a standalone macOS menu-bar prototype that answers questions found in screenshots. It performs Japanese and English OCR locally with Apple Vision, sends the recognized content only to a loopback LM Studio server, and displays the answer in the lower-left corner of the screen. On macOS 26 or later, it can also transcribe currently playing system audio on-device so you can answer listening exercises or ask questions about videos.
+**Read the Japanese on your screen — without sending it anywhere.**
+
+Phototropin is a macOS menu-bar app that translates and answers questions about whatever is
+on your screen. OCR runs locally with Apple Vision, and the recognized text goes only to an
+LM Studio server on loopback. Nothing leaves your Mac.
+
+![Translating a Japanese menu into English on-device](docs/translate.gif)
+
+- **Local only.** Connections are restricted to `127.0.0.1`, `localhost`, and `::1`. No cloud API, no API key, no telemetry.
+- **Reads what you cannot copy.** Japanese and English OCR with Apple Vision, so images, PDFs, video frames, and dialog boxes all work.
+- **Ask a follow-up** about what you just captured, without capturing it again.
+
+![Asking which dish contains no chicken, answered from the captured menu](docs/followup.gif)
+
+This is **v1.0.0 Preview**. Phototropin is published as source only, so you build it once
+with your own Apple Development certificate. That takes a few minutes and does not need a
+paid Apple Developer account.
+
+Phototropin also answers questions found in screenshots, and on macOS 26 or later it can
+transcribe currently playing system audio on-device.
+
+### Speed
+
+Speed depends on the model you load and how you configure it. The clips above run Gemma 4
+E4B with its thinking pass enabled, and are unedited except for the wait, which is sped up
+and labelled.
+
+Turning that thinking pass off in LM Studio brings the same translation down to roughly
+10-18 seconds, because the reasoning tokens dominate the response. Translation gains nothing
+from them. Answering an exam-style question is the opposite: with thinking disabled, a
+reasoning model's answers degrade noticeably. Set it per task rather than once.
 
 Normal use does not require Terminal. After launching the app once, take a screenshot as usual with `Command-Shift-4` and wait for the answer card.
 

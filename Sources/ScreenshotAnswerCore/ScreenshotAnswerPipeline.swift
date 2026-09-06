@@ -12,6 +12,12 @@ public actor ScreenshotAnswerPipeline {
         self.generator = generator
     }
 
+    /// OCR on its own, for callers that already know what they want done with
+    /// the text and do not need the question-answering pass.
+    public func recognizeText(in imageURL: URL) async throws -> String {
+        try await recognizer.recognizeText(in: imageURL)
+    }
+
     public func process(
         imageURL: URL,
         model: String,
